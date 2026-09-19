@@ -533,22 +533,47 @@ local function startFly()
         local cam=workspace.CurrentCamera local mv=Vector3.zero
         if U:IsKeyDown(Enum.KeyCode.W) then mv=mv+cam.CFrame.LookVector end
         if U:IsKeyDown(Enum.KeyCode.S) then mv=mv-cam.CFrame.LookVector end
-        if U:IsKeyDown(Enum.KeyCode.A) then mv=mv-cam.CFrame.RightVector end   -- влево
-        if U:IsKeyDown(Enum.KeyCode.D) then mv=mv+cam.CFrame.RightVector end   -- вправо
+        if U:IsKeyDown(Enum.KeyCode.A) then mv=mv-cam.CFrame.RightVector end
+        if U:IsKeyDown(Enum.KeyCode.D) then mv=mv+cam.CFrame.RightVector end
         if U:IsKeyDown(Enum.KeyCode.Space) then mv=mv+Vector3.new(0,1,0) end
         if U:IsKeyDown(Enum.KeyCode.LeftControl) then mv=mv-Vector3.new(0,1,0) end
         if mv.Magnitude>0 then mv=mv.Unit*flySpd end
         flyBV.Velocity=mv flyBG.CFrame=cam.CFrame
     end)
 end
+
+local function setNoclipParts(state)
+    local c = me.Character
+    if not c then return end
+    local bodyParts = {
+        HumanoidRootPart = true, Head = true,
+        UpperTorso = true, LowerTorso = true,
+        LeftUpperArm = true, LeftLowerArm = true, LeftHand = true,
+        RightUpperArm = true, RightLowerArm = true, RightHand = true,
+        LeftUpperLeg = true, LeftLowerLeg = true, LeftFoot = true,
+        RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
+        Torso = true,
+    }
+    for _, p in ipairs(c:GetDescendants()) do
+        if p:IsA("BasePart") then
+            if state then
+                p.CanCollide = false
+            else
+                if bodyParts[p.Name] then
+                    p.CanCollide = true
+                end
+            end
+        end
+    end
+end
+
 local function startNoclip()
     if noclipC then noclipC:Disconnect() end
-    noclipC=R.Stepped:Connect(function()
-        if not noclip then return end
-        local c=me.Character if not c then return end
-        for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") and p.CanCollide then p.CanCollide=false end end
+    noclipC = R.Stepped:Connect(function()
+        setNoclipParts(noclip)
     end)
 end
+
 local function startInfJump()
     if infJumpC then infJumpC:Disconnect() end
     infJumpC=U.JumpRequest:Connect(function()
@@ -557,11 +582,25 @@ local function startInfJump()
         if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
     end)
 end
-me.CharacterAdded:Connect(function() task.wait(1) if fly then startFly() end if noclip then startNoclip() end end)
+
+me.CharacterAdded:Connect(function()
+    task.wait(1)
+    if fly then startFly() end
+    if noclip then startNoclip() end
+end)
 
 -- ============ REGISTER BINDS ============
 RegisterBind('flyE','Fly','Полёт', function(v) fly=v if v then startFly() else killFly() end end)
-RegisterBind('ncE','Noclip','Проход сквозь стены', function(v) noclip=v if not v and noclipC then noclipC:Disconnect() noclipC=nil end if v then startNoclip() end end)
+RegisterBind('ncE','Noclip','Проход сквозь стены', function(v)
+    noclip=v
+    if v then
+        if not noclipC then startNoclip() end
+        setNoclipParts(true)
+    else
+        setNoclipParts(false)
+        if noclipC then noclipC:Disconnect() noclipC=nil end
+    end
+end)
 RegisterBind('ijE','Infinite Jump','Бесконечный прыжок', function(v) infJump=v if v then startInfJump() elseif infJumpC then infJumpC:Disconnect() infJumpC=nil end end)
 RegisterBind('aimE','Aimbot','Аимбот', function(v) aim=v fovCirc.Visible=v fovFillF.Visible=v and fovFill end)
 RegisterBind('espE','ESP','ESP', function(v) esp=v refreshESP() end)
@@ -598,7 +637,16 @@ EC:AddToggle('espUseTeamC',{Text=TT('Use Teammate Color','Использоват
 local MG=T.P:AddLeftGroupbox(TT('Movement','Движение'))
 MG:AddToggle('flyE',{Text=TT('Fly','Полёт'),Default=false,Callback=function(v) fly=v if v then startFly() else killFly() end end})
 MG:AddSlider('flyS',{Text=TT('Speed','Скорость'),Default=50,Min=10,Max=300,Rounding=0,Suffix='',Callback=function(v) flySpd=v end})
-MG:AddToggle('ncE',{Text=TT('Noclip','Проход сквозь стены'),Default=false,Callback=function(v) noclip=v if not v and noclipC then noclipC:Disconnect() noclipC=nil end if v then startNoclip() end end})
+MG:AddToggle('ncE',{Text=TT('Noclip','Проход сквозь стены'),Default=false,Callback=function(v)
+    noclip=v
+    if v then
+        if not noclipC then startNoclip() end
+        setNoclipParts(true)
+    else
+        setNoclipParts(false)
+        if noclipC then noclipC:Disconnect() noclipC=nil end
+    end
+end})
 MG:AddToggle('ijE',{Text=TT('Infinite Jump','Бесконечный прыжок'),Default=false,Callback=function(v) infJump=v if v then startInfJump() elseif infJumpC then infJumpC:Disconnect() infJumpC=nil end end})
 
 -- ============ FUN TAB ============
