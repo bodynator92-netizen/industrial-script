@@ -7,6 +7,19 @@ local me=P.LocalPlayer
 pcall(function() U.MouseBehavior=Enum.MouseBehavior.Default U.MouseIconEnabled=true end)
 local hasD=(type(Drawing)=="table" and type(Drawing.new)=="function")
 
+-- ============ LANGUAGE ============
+local Lang = "En"
+local function TT(en, ru) if Lang == "Ru" then return ru else return en end end
+
+local function getObsidianGui()
+    local coreGui = game:GetService("CoreGui")
+    for _, g in ipairs(coreGui:GetChildren()) do
+        if g:IsA("ScreenGui") and g.Name == "Obsidian" then return g end
+    end
+    return nil
+end
+
+-- ============ STATE ============
 local esp,names,health,dist,hideDead,espTeam=false,true,true,true,true,false
 local espMax,grad=300,true
 local espVisibleColor=Color3.fromRGB(0,255,0)
@@ -24,12 +37,119 @@ local fovC,fovFill,fovAlpha=Color3.fromRGB(255,60,60),false,0.85
 local fly,flySpd,flyC,flyBV,flyBG=false,50,nil,nil,nil
 local noclip,noclipC=false,nil
 local infJump,infJumpC=false,nil
-local raOn,raDist,raX,raY,raZ,raSpin=false,300,30,8,30,720
-local rbOn,rbDist,rbH,rbRate,rbPos=false,3,0,0.02,"Front"
-local vsOn,vsInt,vsBurst,vsSmooth,vsAlpha,vsPat=false,0.016,5,false,0.5,"random"
-local vsAxX,vsAxY,vsAxZ=true,true,true
-local vsXP,vsXN,vsYP,vsYN,vsZP,vsZN=2500,2500,1500,1500,2500,2500
 
+-- ============ BIND SYSTEM ============
+local Binds = {}          -- id -> {key=..., state=bool, callback=fn, name_en, name_ru}
+local BindButtons = {}    -- id -> {btn=TextButton, label=TextLabel}
+local BindFile = "industrial_binds.txt"
+local CurrentBindId = nil
+local WaitingForBind = false
+
+local function SaveBinds()
+    if not writefile then return end
+    local data = {}
+    for id, b in pairs(Binds) do
+        if b.key then
+            table.insert(data, id .. "|" .. b.key.ClassName .. "|" .. b.key.Name)
+        end
+    end
+    pcall(writefile, BindFile, table.concat(data, "\n"))
+end
+
+local function LoadBinds()
+    if not readfile or not isfile then return end
+    if not isfile(BindFile) then return end
+    local ok, content = pcall(readfile, BindFile)
+    if not ok then return end
+    for line in content:gmatch("[^\n]+") do
+        local id, keyType, keyName = line:match("^([^|]+)|([^|]+)|(.+)$")
+        if id and keyType and keyName and Binds[id] then
+            if keyType == "KeyCode" then
+                local ok2, key = pcall(function() return Enum.KeyCode[keyName] end)
+                if ok2 then Binds[id].key = key end
+            elseif keyType == "UserInputType" then
+                local ok2, key = pcall(function() return Enum.UserInputType[keyName] end)
+                if ok2 then Binds[id].key = key end
+            end
+        end
+    end
+end
+
+local function RefreshBindButton(id)
+    local entry = BindButtons[id]
+    if not entry or not entry.label then return end
+    local b = Binds[id]
+    if b and b.key then
+        entry.label.Text = tostring(b.key.Name or b.key)
+    else
+        entry.label.Text = "—"
+    end
+end
+
+local function BeginBind(id)
+    CurrentBindId = id
+    WaitingForBind = true
+    -- визуально: делаем кнопку жёлтой и текст "..."
+    for bid, entry in pairs(BindButtons) do
+        if entry.label then entry.label.TextColor3 = Color3.fromRGB(200,200,200) end
+    end
+    local e = BindButtons[id]
+    if e and e.label then
+        e.label.Text = "..."
+        e.label.TextColor3 = Color3.fromRGB(255, 220, 80)
+    end
+end
+
+local function ClearBind(id)
+    if Binds[id] then
+        Binds[id].key = nil
+        SaveBinds()
+        RefreshBindButton(id)
+    end
+end
+
+-- ловим нажатие для назначения
+U.InputBegan:Connect(function(input, gp)
+    if not WaitingForBind then return end
+    if gp then return end
+    local id = CurrentBindId
+    if not id or not Binds[id] then return end
+
+    if input.UserInputType == Enum.UserInputType.Keyboard then
+        Binds[id].key = input.KeyCode
+    else
+        Binds[id].key = input.UserInputType
+    end
+    WaitingForBind = false
+    SaveBinds()
+    RefreshBindButton(id)
+    CurrentBindId = nil
+end)
+
+-- ловим срабатывание бинда
+U.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    for id, b in pairs(Binds) do
+        if b.key and b.callback then
+            local match = false
+            if input.UserInputType == Enum.UserInputType.Keyboard and b.key == input.KeyCode then
+                match = true
+            elseif input.UserInputType ~= Enum.UserInputType.Keyboard and b.key == input.UserInputType then
+                match = true
+            end
+            if match then
+                b.state = not b.state
+                pcall(b.callback, b.state)
+            end
+        end
+    end
+end)
+
+local function RegisterBind(id, enName, ruName, callback)
+    Binds[id] = { key = nil, state = false, callback = callback, name_en = enName, name_ru = ruName }
+end
+
+-- ============ FOV Circle ============
 local fovGui=Instance.new("ScreenGui") fovGui.ResetOnSpawn=false fovGui.IgnoreGuiInset=true fovGui.Parent=me:WaitForChild("PlayerGui")
 local fovFillF=Instance.new("Frame") fovFillF.AnchorPoint=Vector2.new(0.5,0.5) fovFillF.BackgroundColor3=fovC
 fovFillF.BackgroundTransparency=fovAlpha fovFillF.BorderSizePixel=0 fovFillF.Size=UDim2.new(0,aimFov*2,0,aimFov*2)
@@ -39,41 +159,54 @@ fovCirc.Size=UDim2.new(0,aimFov*2,0,aimFov*2) fovCirc.Visible=false fovCirc.ZInd
 Instance.new("UICorner",fovCirc).CornerRadius=UDim.new(1,0)
 local fovStr=Instance.new("UIStroke") fovStr.Color=fovC fovStr.Thickness=1.5 fovStr.Parent=fovCirc
 
+-- ============ ASPECT RATIO ============
+local aspectGui = Instance.new("ScreenGui")
+aspectGui.Name = "IndustrialAspect"
+aspectGui.ResetOnSpawn = false
+aspectGui.IgnoreGuiInset = true
+aspectGui.DisplayOrder = 5
+aspectGui.Parent = me:WaitForChild("PlayerGui")
+
+local topBar = Instance.new("Frame")
+topBar.BackgroundColor3 = Color3.new(0,0,0) topBar.BorderSizePixel=0
+topBar.Size=UDim2.new(1,0,0,0) topBar.Position=UDim2.new(0,0,0,0) topBar.Parent=aspectGui
+
+local bottomBar = Instance.new("Frame")
+bottomBar.BackgroundColor3 = Color3.new(0,0,0) bottomBar.BorderSizePixel=0
+bottomBar.Size=UDim2.new(1,0,0,0) bottomBar.Position=UDim2.new(0,0,1,0) bottomBar.AnchorPoint=Vector2.new(0,1) bottomBar.Parent=aspectGui
+
+local function ApplyAspect(ratio)
+    local screenY = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize.Y or 1080
+    local barHeight = 0
+    if ratio < 1 then barHeight = math.floor(screenY * (1 - ratio) * 0.5) end
+    topBar.Size = UDim2.new(1, 0, 0, barHeight)
+    bottomBar.Size = UDim2.new(1, 0, 0, barHeight)
+end
+
 -- ============ TAB ICON PATCH ============
 do
     local ICONS = {
-        Main     = "rbxassetid://10723407389",
-        Player   = "rbxassetid://10734950309",
-        Visual   = "rbxassetid://10734898355",
-        Fun      = "rbxassetid://10734932081",
-        Settings = "rbxassetid://10734950020",
+        Main="rbxassetid://10723407389", Player="rbxassetid://10734950309",
+        Visual="rbxassetid://10734898355", Fun="rbxassetid://10734932081",
+        Binds="rbxassetid://10734932081", Config="rbxassetid://10734950020",
+        Settings="rbxassetid://10734950020", Language="rbxassetid://10734951660",
     }
     local oldAddTab = Library.AddTab
     function Library:AddTab(name, ...)
         local tab = oldAddTab(self, name, ...)
         task.defer(function()
-            local icon = ICONS[name]
-            if not icon then return end
-            local coreGui = game:GetService("CoreGui")
-            for _, g in ipairs(coreGui:GetChildren()) do
-                if g:IsA("ScreenGui") and g.Name == "Obsidian" then
-                    for _, btn in ipairs(g:GetDescendants()) do
-                        if btn:IsA("TextButton") and btn:FindFirstChildOfClass("TextLabel") then
-                            local lbl = btn:FindFirstChildOfClass("TextLabel")
-                            if lbl.Text == name and not btn:FindFirstChild("IndustrialTabIcon") then
-                                lbl.Position = UDim2.new(0, 34, 0, 0)
-                                lbl.Size = UDim2.new(1, -34, 1, 0)
-                                local img = Instance.new("ImageLabel")
-                                img.Name = "IndustrialTabIcon"
-                                img.Size = UDim2.new(0, 18, 0, 18)
-                                img.AnchorPoint = Vector2.new(0, 0.5)
-                                img.Position = UDim2.new(0, 10, 0.5, 0)
-                                img.BackgroundTransparency = 1
-                                img.Image = icon
-                                img.ImageColor3 = Color3.fromRGB(125, 85, 255)
-                                img.Parent = btn
-                            end
-                        end
+            local icon = ICONS[name]; if not icon then return end
+            local g = getObsidianGui(); if not g then return end
+            for _, btn in ipairs(g:GetDescendants()) do
+                if btn:IsA("TextButton") and btn:FindFirstChildOfClass("TextLabel") then
+                    local lbl = btn:FindFirstChildOfClass("TextLabel")
+                    if lbl.Text == name and not btn:FindFirstChild("IndustrialTabIcon") then
+                        lbl.Position=UDim2.new(0,34,0,0); lbl.Size=UDim2.new(1,-34,1,0)
+                        local img=Instance.new("ImageLabel")
+                        img.Name="IndustrialTabIcon"; img.Size=UDim2.new(0,18,0,18)
+                        img.AnchorPoint=Vector2.new(0,0.5); img.Position=UDim2.new(0,10,0.5,0)
+                        img.BackgroundTransparency=1; img.Image=icon
+                        img.ImageColor3=Color3.fromRGB(125,85,255); img.Parent=btn
                     end
                 end
             end
@@ -82,14 +215,9 @@ do
     end
 end
 
-local W=Library:CreateWindow({
-    Title='Industrial',
-    Center=true,
-    AutoShow=true,
-    Footer=''
-})
+local W=Library:CreateWindow({Title='Industrial',Center=true,AutoShow=true,Footer=''})
 
--- ============ DELETE KEYBIND (гарантированное закрытие/открытие) ============
+-- ============ KEYBIND (H) ============
 do
     local menuOpen = true
     U.InputBegan:Connect(function(input, gp)
@@ -97,32 +225,23 @@ do
         if input.KeyCode == Enum.KeyCode.H then
             menuOpen = not menuOpen
             local done = false
-            if Library.Toggle then
-                pcall(function() Library:Toggle() done = true end)
-            end
-            if not done and W and W.Toggle then
-                pcall(function() W:Toggle() done = true end)
-            end
+            if Library.Toggle then pcall(function() Library:Toggle() done = true end) end
+            if not done and W and W.Toggle then pcall(function() W:Toggle() done = true end) end
             if not done then
-                local coreGui = game:GetService("CoreGui")
-                for _, g in ipairs(coreGui:GetChildren()) do
-                    if g:IsA("ScreenGui") and g.Name == "Obsidian" then
-                        g.Enabled = menuOpen
-                    end
-                end
+                local g = getObsidianGui(); if g then g.Enabled = menuOpen end
             end
         end
     end)
 end
 
 local T={
-    C=W:AddTab('Main'),
-    P=W:AddTab('Player'),
-    F=W:AddTab('Fun'),
-    E=W:AddTab('Visual'),
-    Settings=W:AddTab('Settings')
+    C=W:AddTab('Main'), P=W:AddTab('Player'), F=W:AddTab('Fun'),
+    E=W:AddTab('Visual'), B=W:AddTab('Binds'),
+    Config=W:AddTab('Config'), Settings=W:AddTab('Settings'),
+    Lang=W:AddTab('Language')
 }
 
+-- ============ UTILITY ============
 local function sameTeam(p)
     if p==me then return true end
     if me.Team and p.Team and me.Team==p.Team then return true end
@@ -130,20 +249,8 @@ local function sameTeam(p)
     return false
 end
 local function hrp() return me.Character and me.Character:FindFirstChild("HumanoidRootPart") end
-local function closest()
-    local c,md=nil,math.huge local h=hrp() if not h then return nil end
-    for _,p in pairs(P:GetPlayers()) do
-        if p~=me and p.Character then
-            local ph=p.Character:FindFirstChild("HumanoidRootPart")
-            local hum=p.Character:FindFirstChildOfClass("Humanoid")
-            if ph and hum and hum.Health>0 then
-                local d=(h.Position-ph.Position).Magnitude
-                if d<md then md=d c=p end
-            end
-        end
-    end
-    return c
-end
+
+-- ============ ESP ============
 local function rmESP(p)
     local d=espObjs[p] if not d then return end
     for _,k in ipairs({"box","out","hb","hg","nt","dt"}) do if d[k] then d[k]:Remove() end end
@@ -175,6 +282,8 @@ end
 P.PlayerAdded:Connect(function(p) p.CharacterAdded:Connect(function() task.wait(1) if esp then mkESP(p) end end) end)
 for _,p in ipairs(P:GetPlayers()) do if p~=me then p.CharacterAdded:Connect(function() task.wait(1) if esp then mkESP(p) end end) end end
 P.PlayerRemoving:Connect(rmESP)
+
+-- ============ MOVEMENT ============
 local function killFly() if flyC then flyC:Disconnect() flyC=nil end if flyBV then flyBV:Destroy() flyBV=nil end if flyBG then flyBG:Destroy() flyBG=nil end end
 local function startFly()
     killFly()
@@ -212,172 +321,64 @@ local function startInfJump()
     end)
 end
 me.CharacterAdded:Connect(function() task.wait(1) if fly then startFly() end if noclip then startNoclip() end end)
-local raC=nil
-local function startRA()
-    if raC then raC:Disconnect() end
-    local t0,seed=tick(),math.random(1e3,9e3)
-    local h=hrp() if h then _G.raOrig=h.CFrame end
-    raC=R.Heartbeat:Connect(function(dt)
-        if not raOn then return end
-        local hh=hrp() if not hh then return end
-        local t=tick()-t0
-        local y=math.rad(raSpin*dt) local p=math.rad(raSpin*0.37*dt*math.sin(t*3.1)) local r=math.rad(raSpin*0.19*dt*math.cos(t*5.7+seed))
-        local sc=hh.CFrame*CFrame.Angles(p,y,r)
-        local s=raDist/300
-        local jx=(math.random()-0.5)*raX*s*2+math.noise(t*9,seed,0)*raX*s
-        local jy=(math.random()-0.5)*raY*s+math.noise(0,t*9,seed)*raY*s*0.3
-        local jz=(math.random()-0.5)*raZ*s*2+math.noise(0,0,t*9+seed)*raZ*s
-        hh.CFrame=sc+Vector3.new(jx,math.max(sc.Position.Y+jy,2)-sc.Position.Y,jz)
-    end)
-end
-local function stopRA()
-    if raC then raC:Disconnect() raC=nil end
-    if hrp() and _G.raOrig then hrp().CFrame=_G.raOrig end
-end
-local rbC,rbT,rbLast=nil,nil,0
-local function startRB()
-    if rbC then rbC:Disconnect() end
-    rbC=R.Heartbeat:Connect(function()
-        if not rbOn then return end
-        local h=hrp() if not h then return end
-        if not rbT or not rbT.Character or not rbT.Character:FindFirstChild("Humanoid") or rbT.Character.Humanoid.Health<=0 then rbT=closest() return end
-        local tr=rbT.Character:FindFirstChild("HumanoidRootPart") if not tr then return end
-        local now=tick() if (now-rbLast)<rbRate then return end
-        rbLast=now
-        local tp,tl=tr.Position,tr.CFrame.LookVector
-        local d,ho=rbDist,rbH
-        local cf=h.CFrame
-        if rbPos=="Front" then cf=CFrame.lookAt(tp+tl*d+Vector3.new(0,ho,0),tp+Vector3.new(0,ho,0))
-        elseif rbPos=="Back" then cf=CFrame.lookAt(tp-tl*d+Vector3.new(0,ho,0),tp+Vector3.new(0,ho,0))
-        elseif rbPos=="Above" then cf=CFrame.lookAt(tp+Vector3.new(0,d+ho,0),tp+Vector3.new(0,ho,0))
-        elseif rbPos=="Below" then cf=CFrame.lookAt(tp+Vector3.new(0,-d+ho,0),tp+Vector3.new(0,ho,0)) end
-        h.CFrame=cf h.AssemblyLinearVelocity=Vector3.zero h.AssemblyAngularVelocity=Vector3.zero
-    end)
-end
-local function stopRB()
-    if rbC then rbC:Disconnect() rbC=nil end
-    rbT=nil rbLast=0
-end
-local vsC,vsCC=nil,nil
-local vsSpiral,vsWave,vsHelix,vsStrobe=0,0,0,false
-local vsBounce={X=1,Y=1,Z=1} local vsChaos={math.random(),math.random(),math.random()}
-local function vsDelta(dt)
-    local ax,ay,az=vsAxX,vsAxY,vsAxZ local p=vsPat
-    if p=="spiral" then vsSpiral=vsSpiral+0.35 return Vector3.new(ax and math.cos(vsSpiral)*(vsXP+vsXN)/2 or 0,ay and math.sin(vsSpiral*0.6)*(vsYP+vsYN)/2 or 0,az and math.sin(vsSpiral)*(vsZP+vsZN)/2 or 0)
-    elseif p=="wave" then vsWave=vsWave+dt*8 return Vector3.new(ax and math.sin(vsWave)*(vsXP+vsXN)/2 or 0,ay and math.sin(vsWave*1.7)*(vsYP+vsYN)/2 or 0,az and math.cos(vsWave*0.9)*(vsZP+vsZN)/2 or 0)
-    elseif p=="bounce" then
-        local s=Vector3.new(ax and vsBounce.X*(vsXP+vsXN)/3 or 0,ay and vsBounce.Y*(vsYP+vsYN)/3 or 0,az and vsBounce.Z*(vsZP+vsZN)/3 or 0)
-        if math.random()<0.25 then vsBounce.X=-vsBounce.X end
-        if math.random()<0.25 then vsBounce.Y=-vsBounce.Y end
-        if math.random()<0.25 then vsBounce.Z=-vsBounce.Z end
-        return s
-    elseif p=="chaos" then
-        vsChaos[1]=(vsChaos[1]*1664525+1013904223)%1 vsChaos[2]=(vsChaos[2]*22695477+1)%1 vsChaos[3]=(vsChaos[3]*214013+2531011)%1
-        return Vector3.new(ax and (vsChaos[1]*(vsXP+vsXN)-vsXN) or 0,ay and (vsChaos[2]*(vsYP+vsYN)-vsYN) or 0,az and (vsChaos[3]*(vsZP+vsZN)-vsZN) or 0)
-    elseif p=="cross" then
-        local tog=math.floor(tick()*10)%2==0
-        return Vector3.new(ax and (tog and math.random()*(vsXP+vsXN)-vsXN or 0) or 0,ay and (not tog and math.random()*(vsYP+vsYN)-vsYN or 0) or 0,az and (tog and math.random()*(vsZP+vsZN)-vsZN or 0) or 0)
-    elseif p=="helix" then vsHelix=vsHelix+dt*6 return Vector3.new(ax and math.cos(vsHelix*2)*(vsXP+vsXN)/2 or 0,ay and math.sin(vsHelix)*(vsYP+vsYN)/8 or 0,az and math.sin(vsHelix*2)*(vsZP+vsZN)/2 or 0)
-    elseif p=="strobe" then vsStrobe=not vsStrobe local s=vsStrobe and 1 or -1 return Vector3.new(ax and s*vsXP or 0,ay and s*vsYP or 0,az and s*vsZP or 0)
-    else return Vector3.new(ax and math.random()*(vsXP+vsXN)-vsXN or 0,ay and math.random()*(vsYP+vsYN)-vsYN or 0,az and math.random()*(vsZP+vsZN)-vsZN or 0) end
-end
-local function startVS()
-    if vsC then return end
-    vsSpiral,vsWave,vsHelix,vsStrobe=0,0,0,false
-    vsBounce={X=1,Y=1,Z=1} vsChaos={math.random(),math.random(),math.random()}
-    local root,hum
-    local function rf()
-        local c=me.Character if not c then root=nil hum=nil return end
-        root=c:FindFirstChild("HumanoidRootPart") hum=c:FindFirstChildOfClass("Humanoid")
-    end
-    rf()
-    vsCC=me.CharacterAdded:Connect(function(c) root=c:WaitForChild("HumanoidRootPart") hum=c:WaitForChild("Humanoid") task.wait(0.2) if vsOn and hum then hum:ChangeState(Enum.HumanoidStateType.Physics) end end)
-    local acc,dtBuf=0,0
-    vsC=R.Heartbeat:Connect(function(dt)
-        if not vsOn then stopVS() return end
-        if not root or not root.Parent then rf() return end
-        if hum and hum.Health<=0 then return end
-        dtBuf=dtBuf+dt acc=acc+dt
-        local iv=math.max(vsInt,0.005)
-        if acc<iv then return end
-        acc=acc%iv
-        local burst=math.clamp(vsBurst,1,20)
-        for _=1,burst do
-            if not root or not root.Parent then break end
-            local pos=root.Position local look=root.CFrame.LookVector
-            local dl=vsDelta(dtBuf/burst)
-            local np=vsSmooth and pos:Lerp(pos+dl,math.clamp(vsAlpha,0.01,1)) or (pos+dl)
-            root.CFrame=CFrame.new(np,np+look)
-        end
-        dtBuf=0
-    end)
-end
-local function stopVS() if vsC then vsC:Disconnect() vsC=nil end if vsCC then vsCC:Disconnect() vsCC=nil end end
+
+-- ============ REGISTER BINDS ============
+RegisterBind('flyE','Fly','Полёт', function(v) fly=v if v then startFly() else killFly() end end)
+RegisterBind('ncE','Noclip','Проход сквозь стены', function(v) noclip=v if not v and noclipC then noclipC:Disconnect() noclipC=nil end if v then startNoclip() end end)
+RegisterBind('ijE','Infinite Jump','Бесконечный прыжок', function(v) infJump=v if v then startInfJump() elseif infJumpC then infJumpC:Disconnect() infJumpC=nil end end)
+RegisterBind('aimE','Aimbot','Аимбот', function(v) aim=v fovCirc.Visible=v fovFillF.Visible=v and fovFill end)
+RegisterBind('espE','ESP','ESP', function(v) esp=v refreshESP() end)
+RegisterBind('trigE','Triggerbot','Триггербот', function(v) trig=v end)
+
+LoadBinds()
 
 -- ============ MAIN TAB ============
-local AG=T.C:AddLeftGroupbox('Combat')
-AG:AddToggle('aimE',{Text='Aimbot',Default=false,Callback=function(v) aim=v fovCirc.Visible=v fovFillF.Visible=v and fovFill end})
-AG:AddToggle('aimT',{Text='Team Check',Default=false,Callback=function(v) aimTeam=v end})
-AG:AddDropdown('aimPart',{Text='Lock Part',Default='Head',Values={'Head','UpperTorso','LowerTorso','HumanoidRootPart','LeftArm','RightArm','LeftLeg','RightLeg'},Callback=function(v) aimTarget=v end})
-AG:AddToggle('aimRand',{Text='Random Part',Default=false,Callback=function(v) aimTargetRandom=v end})
-AG:AddSlider('aimF',{Text='FOV',Default=150,Min=0,Max=400,Rounding=0,Suffix='',Callback=function(v) aimFov=v fovCirc.Size=UDim2.new(0,v*2,0,v*2) fovFillF.Size=UDim2.new(0,v*2,0,v*2) end})
-AG:AddSlider('aimS',{Text='Smooth',Default=5,Min=0,Max=100,Rounding=0,Suffix='%',Callback=function(v) aimSmooth=v/100 end})
-AG:AddSlider('aimM',{Text='Max Dist',Default=100,Min=10,Max=500,Rounding=0,Suffix='',Callback=function(v) aimMax=v end})
-local TG=T.C:AddRightGroupbox('Trigger Bot')
-TG:AddToggle('trigE',{Text='Triggerbot',Default=false,Callback=function(v) trig=v end})
-TG:AddSlider('trigD',{Text='Delay (ms)',Default=50,Min=10,Max=500,Rounding=0,Suffix='',Callback=function(v) trigDelay=v/1000 end})
-local FG=T.C:AddRightGroupbox('FOV Circle')
-FG:AddLabel('FOV Color'):AddColorPicker('fovC',{Default=fovC,Title='FOV Color',Transparency=0,Callback=function(v) fovC=v fovStr.Color=v fovFillF.BackgroundColor3=v end})
-FG:AddToggle('fovFillE',{Text='Fill',Default=false,Callback=function(v) fovFill=v fovFillF.Visible=v and aim end})
-FG:AddSlider('fovA',{Text='Fill Alpha',Default=85,Min=0,Max=100,Rounding=0,Suffix='%',Callback=function(v) fovAlpha=v/100 fovFillF.BackgroundTransparency=v/100 end})
-local EC=T.C:AddLeftGroupbox('ESP Colors')
-EC:AddLabel('Visible Color'):AddColorPicker('espVisC',{Default=espVisibleColor,Title='Visible Color',Transparency=0,
+local AG=T.C:AddLeftGroupbox(TT('Combat','Бой'))
+AG:AddToggle('aimE',{Text=TT('Aimbot','Аимбот'),Default=false,Callback=function(v) aim=v fovCirc.Visible=v fovFillF.Visible=v and fovFill end})
+AG:AddToggle('aimT',{Text=TT('Team Check','Проверка команды'),Default=false,Callback=function(v) aimTeam=v end})
+AG:AddDropdown('aimPart',{Text=TT('Lock Part','Часть захвата'),Default='Head',Values={'Head','UpperTorso','LowerTorso','HumanoidRootPart','LeftArm','RightArm','LeftLeg','RightLeg'},Callback=function(v) aimTarget=v end})
+AG:AddToggle('aimRand',{Text=TT('Random Part','Случайная часть'),Default=false,Callback=function(v) aimTargetRandom=v end})
+AG:AddSlider('aimF',{Text=TT('FOV','Радиус'),Default=150,Min=0,Max=400,Rounding=0,Suffix='',Callback=function(v) aimFov=v fovCirc.Size=UDim2.new(0,v*2,0,v*2) fovFillF.Size=UDim2.new(0,v*2,0,v*2) end})
+AG:AddSlider('aimS',{Text=TT('Smooth','Плавность'),Default=5,Min=0,Max=100,Rounding=0,Suffix='%',Callback=function(v) aimSmooth=v/100 end})
+AG:AddSlider('aimM',{Text=TT('Max Dist','Макс. дистанция'),Default=100,Min=10,Max=500,Rounding=0,Suffix='',Callback=function(v) aimMax=v end})
+local TG=T.C:AddRightGroupbox(TT('Trigger Bot','Триггер-бот'))
+TG:AddToggle('trigE',{Text=TT('Triggerbot','Триггербот'),Default=false,Callback=function(v) trig=v end})
+TG:AddSlider('trigD',{Text=TT('Delay (ms)','Задержка (мс)'),Default=50,Min=10,Max=500,Rounding=0,Suffix='',Callback=function(v) trigDelay=v/1000 end})
+local FG=T.C:AddRightGroupbox(TT('FOV Circle','Круг FOV'))
+FG:AddLabel(TT('FOV Color','Цвет FOV')):AddColorPicker('fovC',{Default=fovC,Title=TT('FOV Color','Цвет FOV'),Transparency=0,Callback=function(v) fovC=v fovStr.Color=v fovFillF.BackgroundColor3=v end})
+FG:AddToggle('fovFillE',{Text=TT('Fill','Заливка'),Default=false,Callback=function(v) fovFill=v fovFillF.Visible=v and aim end})
+FG:AddSlider('fovA',{Text=TT('Fill Alpha','Прозрачность заливки'),Default=85,Min=0,Max=100,Rounding=0,Suffix='%',Callback=function(v) fovAlpha=v/100 fovFillF.BackgroundTransparency=v/100 end})
+local EC=T.C:AddLeftGroupbox(TT('ESP Colors','Цвета ESP'))
+EC:AddLabel(TT('Visible Color','Видимый цвет')):AddColorPicker('espVisC',{Default=espVisibleColor,Title=TT('Visible Color','Видимый цвет'),Transparency=0,
     Callback=function(v) espVisibleColor=v for _,d in pairs(espObjs) do if d.box then d.box.Color=v end end end})
-EC:AddLabel('Hidden Color'):AddColorPicker('espHidC',{Default=espHiddenColor,Title='Hidden Color',Transparency=0,
+EC:AddLabel(TT('Hidden Color','Цвет за укрытием')):AddColorPicker('espHidC',{Default=espHiddenColor,Title=TT('Hidden Color','Цвет за укрытием'),Transparency=0,
     Callback=function(v) espHiddenColor=v end})
-EC:AddLabel('Teammate Color'):AddColorPicker('espTeamC',{Default=espTeammateColor,Title='Teammate Color',Transparency=0,
+EC:AddLabel(TT('Teammate Color','Цвет союзника')):AddColorPicker('espTeamC',{Default=espTeammateColor,Title=TT('Teammate Color','Цвет союзника'),Transparency=0,
     Callback=function(v) espTeammateColor=v end})
-EC:AddToggle('espUseTeamC',{Text='Use Teammate Color',Default=false,Callback=function(v) espUseTeamColor=v end})
+EC:AddToggle('espUseTeamC',{Text=TT('Use Teammate Color','Использовать цвет союзника'),Default=false,Callback=function(v) espUseTeamColor=v end})
 
 -- ============ PLAYER TAB ============
-local MG=T.P:AddLeftGroupbox('Movement')
-MG:AddToggle('flyE',{Text='Fly',Default=false,Callback=function(v) fly=v if v then startFly() else killFly() end end})
-MG:AddSlider('flyS',{Text='Speed',Default=50,Min=10,Max=300,Rounding=0,Suffix='',Callback=function(v) flySpd=v end})
-MG:AddToggle('ncE',{Text='Noclip',Default=false,Callback=function(v) noclip=v if not v and noclipC then noclipC:Disconnect() noclipC=nil end if v then startNoclip() end end})
-MG:AddToggle('ijE',{Text='Infinite Jump',Default=false,Callback=function(v) infJump=v if v then startInfJump() elseif infJumpC then infJumpC:Disconnect() infJumpC=nil end end})
-local RA=T.P:AddLeftGroupbox('Extra')
-RA:AddToggle('raE',{Text='Riot Abuser',Default=false,Callback=function(v) raOn=v if v then startRA() else stopRA() end end})
-RA:AddSlider('raD',{Text='Spread',Default=300,Min=10,Max=1000,Rounding=0,Suffix='',Callback=function(v) raDist=v end})
-RA:AddSlider('raX',{Text='X',Default=30,Min=0,Max=200,Rounding=0,Suffix='',Callback=function(v) raX=v end})
-RA:AddSlider('raY',{Text='Y',Default=8,Min=0,Max=100,Rounding=0,Suffix='',Callback=function(v) raY=v end})
-RA:AddSlider('raZ',{Text='Z',Default=30,Min=0,Max=200,Rounding=0,Suffix='',Callback=function(v) raZ=v end})
-RA:AddSlider('raS',{Text='Spin',Default=720,Min=0,Max=2000,Rounding=0,Suffix='',Callback=function(v) raSpin=v end})
-local RB=T.P:AddRightGroupbox('Riot Bypass')
-RB:AddToggle('rbE',{Text='Riot Bypass',Default=false,Callback=function(v) rbOn=v if v then startRB() else stopRB() end end})
-RB:AddSlider('rbD',{Text='Dist',Default=3,Min=0,Max=20,Rounding=1,Suffix='',Callback=function(v) rbDist=v end})
-RB:AddSlider('rbH',{Text='Height',Default=0,Min=-20,Max=20,Rounding=1,Suffix='',Callback=function(v) rbH=v end})
-RB:AddSlider('rbR',{Text='Rate',Default=20,Min=1,Max=500,Rounding=0,Suffix='',Callback=function(v) rbRate=v/1000 end})
-RB:AddDropdown('rbP',{Text='Position',Default='Front',Values={'Front','Back','Above','Below'},Callback=function(v) rbPos=v end})
+local MG=T.P:AddLeftGroupbox(TT('Movement','Движение'))
+MG:AddToggle('flyE',{Text=TT('Fly','Полёт'),Default=false,Callback=function(v) fly=v if v then startFly() else killFly() end end})
+MG:AddSlider('flyS',{Text=TT('Speed','Скорость'),Default=50,Min=10,Max=300,Rounding=0,Suffix='',Callback=function(v) flySpd=v end})
+MG:AddToggle('ncE',{Text=TT('Noclip','Проход сквозь стены'),Default=false,Callback=function(v) noclip=v if not v and noclipC then noclipC:Disconnect() noclipC=nil end if v then startNoclip() end end})
+MG:AddToggle('ijE',{Text=TT('Infinite Jump','Бесконечный прыжок'),Default=false,Callback=function(v) infJump=v if v then startInfJump() elseif infJumpC then infJumpC:Disconnect() infJumpC=nil end end})
 
 -- ============ FUN TAB ============
-local FL=T.F:AddLeftGroupbox('Fun')
-FL:AddLabel('Fun features coming soon.')
-FL:AddButton({Text='Jump Scare (sound)',Func=function()
-    local s=Instance.new("Sound")
-    s.SoundId="rbxassetid://130777695"
-    s.Volume=5
-    s.Parent=me:WaitForChild("PlayerGui")
-    s:Play()
+local FL=T.F:AddLeftGroupbox(TT('Fun','Развлечения'))
+FL:AddLabel(TT('Fun features coming soon.','Развлекательные функции скоро.'))
+FL:AddButton({Text=TT('Jump Scare (sound)','Пугнуть (звук)'),Func=function()
+    local s=Instance.new("Sound") s.SoundId="rbxassetid://130777695" s.Volume=5
+    s.Parent=me:WaitForChild("PlayerGui") s:Play()
     task.delay(3,function() if s then s:Destroy() end end)
 end})
-FL:AddButton({Text='Flip Character',Func=function()
-    local h=hrp()
-    if h then h.CFrame=h.CFrame*CFrame.Angles(math.rad(180),0,0) end
+FL:AddButton({Text=TT('Flip Character','Перевернуть персонажа'),Func=function()
+    local h=hrp() if h then h.CFrame=h.CFrame*CFrame.Angles(math.rad(180),0,0) end
 end})
 
 -- ============ VISUAL TAB ============
-local Gfx=T.E:AddLeftGroupbox('Graphics')
-Gfx:AddButton({Text='RTX Toggle',Func=function()
+local Gfx=T.E:AddLeftGroupbox(TT('Graphics','Графика'))
+Gfx:AddButton({Text=TT('RTX Toggle','Переключить RTX'),Func=function()
     if not _G.RTX then _G.RTX={on=false,orig={Technology=L.Technology,Brightness=L.Brightness},refl={}} end
     local r=_G.RTX r.on=not r.on
     if r.on then
@@ -392,16 +393,189 @@ Gfx:AddButton({Text='RTX Toggle',Func=function()
         r.refl={}
     end
 end})
-local EM=T.E:AddLeftGroupbox('Visual')
-EM:AddToggle('espE',{Text='ESP',Default=false,Callback=function(v) esp=v refreshESP() end})
-EM:AddToggle('espT',{Text='Team Check',Default=false,Callback=function(v) espTeam=v refreshESP() end})
-local ED=T.E:AddLeftGroupbox('Display')
-ED:AddToggle('nE',{Text='Names',Default=true,Callback=function(v) names=v end})
-ED:AddToggle('hE',{Text='Health',Default=true,Callback=function(v) health=v end})
-ED:AddToggle('dE',{Text='Distance',Default=true,Callback=function(v) dist=v end})
-ED:AddToggle('gE',{Text='Gradient',Default=true,Callback=function(v) grad=v end})
-ED:AddToggle('ddE',{Text='Hide Dead',Default=true,Callback=function(v) hideDead=v end})
-T.E:AddRightGroupbox('Range'):AddSlider('eMax',{Text='Max Dist',Default=300,Min=10,Max=1000,Rounding=0,Suffix='',Callback=function(v) espMax=v end})
+local CamBox = T.E:AddRightGroupbox(TT('Camera','Камера'))
+CamBox:AddSlider('camFovS',{Text=TT('Camera FOV','Угол обзора камеры'),Default=70,Min=30,Max=120,Rounding=0,Suffix='',Callback=function(v)
+    local cam = workspace.CurrentCamera
+    if cam then cam.FieldOfView = v end
+end})
+CamBox:AddButton({Text=TT('Reset Camera FOV','Сбросить FOV камеры'),Func=function()
+    local cam = workspace.CurrentCamera
+    if cam then cam.FieldOfView = 70 end
+end})
+CamBox:AddSlider('aspectS',{Text=TT('Aspect Ratio','Соотношение сторон'),Default=100,Min=50,Max=100,Rounding=0,Suffix='%',Callback=function(v) ApplyAspect(v/100) end})
+CamBox:AddButton({Text=TT('Reset Aspect','Сбросить Aspect'),Func=function() ApplyAspect(1) end})
+
+local EM=T.E:AddLeftGroupbox(TT('Visual','Визуал'))
+EM:AddToggle('espE',{Text=TT('ESP','ESP'),Default=false,Callback=function(v) esp=v refreshESP() end})
+EM:AddToggle('espT',{Text=TT('Team Check','Проверка команды'),Default=false,Callback=function(v) espTeam=v refreshESP() end})
+local ED=T.E:AddLeftGroupbox(TT('Display','Отображение'))
+ED:AddToggle('nE',{Text=TT('Names','Имена'),Default=true,Callback=function(v) names=v end})
+ED:AddToggle('hE',{Text=TT('Health','Здоровье'),Default=true,Callback=function(v) health=v end})
+ED:AddToggle('dE',{Text=TT('Distance','Дистанция'),Default=true,Callback=function(v) dist=v end})
+ED:AddToggle('gE',{Text=TT('Gradient','Градиент'),Default=true,Callback=function(v) grad=v end})
+ED:AddToggle('ddE',{Text=TT('Hide Dead','Скрывать мёртвых'),Default=true,Callback=function(v) hideDead=v end})
+T.E:AddRightGroupbox(TT('Range','Дальность')):AddSlider('eMax',{Text=TT('Max Dist','Макс. дистанция'),Default=300,Min=10,Max=1000,Rounding=0,Suffix='',Callback=function(v) espMax=v end})
+
+-- ============ BINDS TAB (собственный список) ============
+local BB = T.B:AddLeftGroupbox(TT('Keybinds','Бинды'))
+BB:AddLabel(TT('Click "—" to bind, "✕" to clear.','Нажми "—" чтобы забиндить, "✕" чтобы сбросить.'))
+
+-- Создаём отдельный ScreenGui со списком биндов (только для вкладки Binds)
+local bindListGui = Instance.new("ScreenGui")
+bindListGui.Name = "IndustrialBindsList"
+bindListGui.ResetOnSpawn = false
+bindListGui.IgnoreGuiInset = true
+bindListGui.DisplayOrder = 3
+bindListGui.Parent = me:WaitForChild("PlayerGui")
+
+local listFrame = Instance.new("Frame")
+listFrame.Name = "ListFrame"
+listFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+listFrame.BorderSizePixel = 0
+listFrame.Size = UDim2.new(0, 320, 0, 250)
+listFrame.Position = UDim2.new(0.5, -160, 0.5, -125)
+listFrame.Visible = false
+listFrame.Parent = bindListGui
+Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 8)
+local stroke = Instance.new("UIStroke", listFrame)
+stroke.Color = Color3.fromRGB(125, 85, 255)
+stroke.Thickness = 1
+
+local listTitle = Instance.new("TextLabel")
+listTitle.Size = UDim2.new(1, 0, 0, 28)
+listTitle.BackgroundTransparency = 1
+listTitle.TextColor3 = Color3.fromRGB(220, 220, 220)
+listTitle.Font = Enum.Font.GothamBold
+listTitle.TextSize = 14
+listTitle.Text = "Binds"
+listTitle.Parent = listFrame
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, -10, 1, -40)
+scroll.Position = UDim2.new(0, 5, 0, 32)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.ScrollBarThickness = 4
+scroll.Parent = listFrame
+
+local uiList = Instance.new("UIListLayout")
+uiList.Padding = UDim.new(0, 6)
+uiList.SortOrder = Enum.SortOrder.LayoutOrder
+uiList.Parent = scroll
+
+local function makeRow(id, nameText, order)
+    local row = Instance.new("Frame")
+    row.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
+    row.BorderSizePixel = 0
+    row.Size = UDim2.new(1, -8, 0, 36)
+    row.LayoutOrder = order
+    row.Parent = scroll
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -110, 1, 0)
+    lbl.Position = UDim2.new(0, 10, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.TextColor3 = Color3.fromRGB(220, 220, 220)
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Text = nameText
+    lbl.Parent = row
+
+    local btnBind = Instance.new("TextButton")
+    btnBind.Size = UDim2.new(0, 60, 0, 24)
+    btnBind.Position = UDim2.new(1, -100, 0.5, 0)
+    btnBind.AnchorPoint = Vector2.new(1, 0.5)
+    btnBind.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
+    btnBind.TextColor3 = Color3.fromRGB(220, 220, 220)
+    btnBind.Font = Enum.Font.Gotham
+    btnBind.TextSize = 12
+    btnBind.Text = "—"
+    btnBind.Parent = row
+    Instance.new("UICorner", btnBind).CornerRadius = UDim.new(0, 5)
+
+    local btnClear = Instance.new("TextButton")
+    btnClear.Size = UDim2.new(0, 28, 0, 24)
+    btnClear.Position = UDim2.new(1, -36, 0.5, 0)
+    btnClear.AnchorPoint = Vector2.new(1, 0.5)
+    btnClear.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
+    btnClear.TextColor3 = Color3.fromRGB(240, 180, 180)
+    btnClear.Font = Enum.Font.GothamBold
+    btnClear.TextSize = 12
+    btnClear.Text = "✕"
+    btnClear.Parent = row
+    Instance.new("UICorner", btnClear).CornerRadius = UDim.new(0, 5)
+
+    btnBind.MouseButton1Click:Connect(function() BeginBind(id) end)
+    btnClear.MouseButton1Click:Connect(function() ClearBind(id) end)
+
+    BindButtons[id] = {btn=btnBind, label=btnBind}
+    RefreshBindButton(id)
+end
+
+-- Заполняем список
+local order = 0
+for _, entry in ipairs({
+    {'flyE','Fly','Полёт'},
+    {'ncE','Noclip','Проход сквозь стены'},
+    {'ijE','Infinite Jump','Бесконечный прыжок'},
+    {'aimE','Aimbot','Аимбот'},
+    {'espE','ESP','ESP'},
+    {'trigE','Triggerbot','Триггербот'},
+}) do
+    order = order + 1
+    makeRow(entry[1], TT(entry[2], entry[3]), order)
+end
+scroll.CanvasSize = UDim2.new(0, 0, 0, uiList.AbsoluteContentSize.Y + 10)
+
+-- Кнопка в Obsidian для открытия списка
+BB:AddButton({Text = TT('Open Bind List','Открыть список биндов'), Func=function()
+    listFrame.Visible = not listFrame.Visible
+    scroll.CanvasSize = UDim2.new(0, 0, 0, uiList.AbsoluteContentSize.Y + 10)
+end})
+
+-- Закрытие списка по крестику/клику вне не нужен — можно закрыть той же кнопкой
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 24, 0, 24)
+closeBtn.Position = UDim2.new(1, -28, 0, 4)
+closeBtn.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
+closeBtn.TextColor3 = Color3.fromRGB(240, 180, 180)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 13
+closeBtn.Text = "✕"
+closeBtn.Parent = listFrame
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
+closeBtn.MouseButton1Click:Connect(function() listFrame.Visible = false end)
+
+-- ============ CONFIG TAB ============
+T.Config:AddLeftGroupbox(TT('Configuration','Конфигурация'))
+
+-- ============ SETTINGS TAB ============
+local Menu=T.Settings:AddLeftGroupbox(TT('Menu','Меню'))
+Menu:AddButton({Text=TT('Unload','Выгрузить'),Func=function()
+    killFly()
+    if noclipC then noclipC:Disconnect() end
+    if infJumpC then infJumpC:Disconnect() end
+    if fovGui then fovGui:Destroy() end
+    if aspectGui then aspectGui:Destroy() end
+    if bindListGui then bindListGui:Destroy() end
+    Library:Unload()
+end})
+
+-- ============ LANGUAGE TAB ============
+local LB = T.Lang:AddLeftGroupbox(TT('Language','Язык'))
+LB:AddLabel(TT('Select interface language:','Выберите язык интерфейса:'))
+LB:AddButton({Text='English',Func=function()
+    Lang = "En"
+    Library:Notify("Language: English (reopen H to apply)", 2)
+end})
+LB:AddButton({Text='Русский',Func=function()
+    Lang = "Ru"
+    Library:Notify("Язык: Русский (переоткрой H для применения)", 2)
+end})
+LB:AddLabel(TT('Note: reopen the menu (H) to fully apply.','Примечание: переоткрой меню (H) чтобы язык применился.'))
 
 -- ============ RENDER LOOPS ============
 local Cam=workspace.CurrentCamera
@@ -497,16 +671,10 @@ R.RenderStepped:Connect(function()
     if hum and hum.Health>0 then mouse1click() lastTrig=now end
 end)
 
--- ============ SETTINGS TAB ============
-local Menu=T.Settings:AddLeftGroupbox('Menu')
-Menu:AddButton({Text='Unload',Func=function()
-    killFly()
-    if noclipC then noclipC:Disconnect() end
-    if infJumpC then infJumpC:Disconnect() end
-    stopRA() stopRB() stopVS()
-    Library:Unload()
-end})
-
-ThemeManager:SetLibrary(Library) SaveManager:SetLibrary(Library) SaveManager:IgnoreThemeSettings()
-SaveManager:BuildConfigSection(T.Settings) ThemeManager:ApplyToTab(T.Settings)
+-- ============ SAVE/THEME SETUP ============
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:BuildConfigSection(T.Config)
+ThemeManager:ApplyToTab(T.E)
 SaveManager:LoadAutoloadConfig()
