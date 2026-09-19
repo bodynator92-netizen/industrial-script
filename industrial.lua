@@ -1,3 +1,119 @@
+-- ============================================================
+--  KEY SYSTEM (локальный ключ)
+-- ============================================================
+local Players = game:GetService("Players")
+local me = Players.LocalPlayer
+local plrGui = me:WaitForChild("PlayerGui")
+
+local SECRET_KEY = "SukaGiveKey"   -- <-- твой ключ
+
+-- ============ KEY GUI ============
+local keyGui = Instance.new("ScreenGui")
+keyGui.Name = "IndustrialKeySystem"
+keyGui.ResetOnSpawn = false
+keyGui.IgnoreGuiInset = true
+keyGui.DisplayOrder = 1000
+keyGui.Parent = plrGui
+
+local bg = Instance.new("Frame")
+bg.Size = UDim2.new(0, 400, 0, 220)
+bg.Position = UDim2.new(0.5, -200, 0.5, -110)
+bg.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+bg.BorderSizePixel = 0
+bg.Parent = keyGui
+Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 12)
+local stroke = Instance.new("UIStroke", bg)
+stroke.Color = Color3.fromRGB(125, 85, 255)
+stroke.Thickness = 2
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 40)
+title.Position = UDim2.new(0, 0, 0, 10)
+title.BackgroundTransparency = 1
+title.TextColor3 = Color3.fromRGB(230, 230, 240)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 20
+title.Text = "Industrial — Key System"
+title.Parent = bg
+
+local info = Instance.new("TextLabel")
+info.Size = UDim2.new(1, -20, 0, 30)
+info.Position = UDim2.new(0, 10, 0, 55)
+info.BackgroundTransparency = 1
+info.TextColor3 = Color3.fromRGB(160, 160, 175)
+info.Font = Enum.Font.Gotham
+info.TextSize = 13
+info.Text = "Введите ключ доступа"
+info.Parent = bg
+
+local box = Instance.new("TextBox")
+box.Size = UDim2.new(1, -40, 0, 40)
+box.Position = UDim2.new(0, 20, 0, 95)
+box.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+box.BorderSizePixel = 0
+box.TextColor3 = Color3.fromRGB(230, 230, 240)
+box.PlaceholderText = "XXXX-XXXX-XXXX"
+box.PlaceholderColor3 = Color3.fromRGB(110, 110, 125)
+box.Font = Enum.Font.Gotham
+box.TextSize = 14
+box.Text = ""
+box.ClearTextOnFocus = false
+box.Parent = bg
+Instance.new("UICorner", box).CornerRadius = UDim.new(0, 8)
+
+local btn = Instance.new("TextButton")
+btn.Size = UDim2.new(1, -40, 0, 40)
+btn.Position = UDim2.new(0, 20, 0, 150)
+btn.BackgroundColor3 = Color3.fromRGB(80, 60, 180)
+btn.TextColor3 = Color3.new(1,1,1)
+btn.Font = Enum.Font.GothamBold
+btn.TextSize = 14
+btn.Text = "Проверить ключ"
+btn.Parent = bg
+Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -20, 0, 20)
+status.Position = UDim2.new(0, 10, 1, -22)
+status.BackgroundTransparency = 1
+status.TextColor3 = Color3.fromRGB(200, 80, 80)
+status.Font = Enum.Font.Gotham
+status.TextSize = 12
+status.Text = ""
+status.Parent = bg
+
+local validKey = nil
+
+local function tryKey()
+    local k = box.Text
+    if k == "" then
+        status.Text = "Введите ключ"
+        return
+    end
+    if k == SECRET_KEY then
+        status.TextColor3 = Color3.fromRGB(80, 220, 120)
+        status.Text = "Ключ принят"
+        validKey = k
+        task.wait(0.4)
+        keyGui:Destroy()
+    else
+        status.TextColor3 = Color3.fromRGB(220, 80, 80)
+        status.Text = "Неверный ключ"
+    end
+end
+
+btn.MouseButton1Click:Connect(tryKey)
+box.FocusLost:Connect(function(enter)
+    if enter then tryKey() end
+end)
+
+while not validKey do
+    task.wait(0.1)
+end
+
+-- ============================================================
+--  ОСНОВНОЙ ЧИТ (Industrial)
+-- ============================================================
 local Library=loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local ThemeManager=loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/ThemeManager.lua"))()
 local SaveManager=loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/SaveManager.lua"))()
@@ -39,8 +155,8 @@ local noclip,noclipC=false,nil
 local infJump,infJumpC=false,nil
 
 -- ============ BIND SYSTEM ============
-local Binds = {}          -- id -> {key=..., state=bool, callback=fn, name_en, name_ru}
-local BindButtons = {}    -- id -> {btn=TextButton, label=TextLabel}
+local Binds = {}
+local BindButtons = {}
 local BindFile = "industrial_binds.txt"
 local CurrentBindId = nil
 local WaitingForBind = false
@@ -89,7 +205,6 @@ end
 local function BeginBind(id)
     CurrentBindId = id
     WaitingForBind = true
-    -- визуально: делаем кнопку жёлтой и текст "..."
     for bid, entry in pairs(BindButtons) do
         if entry.label then entry.label.TextColor3 = Color3.fromRGB(200,200,200) end
     end
@@ -108,13 +223,11 @@ local function ClearBind(id)
     end
 end
 
--- ловим нажатие для назначения
 U.InputBegan:Connect(function(input, gp)
     if not WaitingForBind then return end
     if gp then return end
     local id = CurrentBindId
     if not id or not Binds[id] then return end
-
     if input.UserInputType == Enum.UserInputType.Keyboard then
         Binds[id].key = input.KeyCode
     else
@@ -126,7 +239,6 @@ U.InputBegan:Connect(function(input, gp)
     CurrentBindId = nil
 end)
 
--- ловим срабатывание бинда
 U.InputBegan:Connect(function(input, gp)
     if gp then return end
     for id, b in pairs(Binds) do
@@ -416,11 +528,10 @@ ED:AddToggle('gE',{Text=TT('Gradient','Градиент'),Default=true,Callback=
 ED:AddToggle('ddE',{Text=TT('Hide Dead','Скрывать мёртвых'),Default=true,Callback=function(v) hideDead=v end})
 T.E:AddRightGroupbox(TT('Range','Дальность')):AddSlider('eMax',{Text=TT('Max Dist','Макс. дистанция'),Default=300,Min=10,Max=1000,Rounding=0,Suffix='',Callback=function(v) espMax=v end})
 
--- ============ BINDS TAB (собственный список) ============
+-- ============ BINDS TAB ============
 local BB = T.B:AddLeftGroupbox(TT('Keybinds','Бинды'))
 BB:AddLabel(TT('Click "—" to bind, "✕" to clear.','Нажми "—" чтобы забиндить, "✕" чтобы сбросить.'))
 
--- Создаём отдельный ScreenGui со списком биндов (только для вкладки Binds)
 local bindListGui = Instance.new("ScreenGui")
 bindListGui.Name = "IndustrialBindsList"
 bindListGui.ResetOnSpawn = false
@@ -515,7 +626,6 @@ local function makeRow(id, nameText, order)
     RefreshBindButton(id)
 end
 
--- Заполняем список
 local order = 0
 for _, entry in ipairs({
     {'flyE','Fly','Полёт'},
@@ -530,13 +640,11 @@ for _, entry in ipairs({
 end
 scroll.CanvasSize = UDim2.new(0, 0, 0, uiList.AbsoluteContentSize.Y + 10)
 
--- Кнопка в Obsidian для открытия списка
 BB:AddButton({Text = TT('Open Bind List','Открыть список биндов'), Func=function()
     listFrame.Visible = not listFrame.Visible
     scroll.CanvasSize = UDim2.new(0, 0, 0, uiList.AbsoluteContentSize.Y + 10)
 end})
 
--- Закрытие списка по крестику/клику вне не нужен — можно закрыть той же кнопкой
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 24, 0, 24)
 closeBtn.Position = UDim2.new(1, -28, 0, 4)
