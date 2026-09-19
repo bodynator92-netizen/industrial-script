@@ -5,9 +5,8 @@ local Players = game:GetService("Players")
 local me = Players.LocalPlayer
 local plrGui = me:WaitForChild("PlayerGui")
 
-local SECRET_KEY = "1"   -- <-- твой ключ
+local SECRET_KEY = "1"
 
--- ============ KEY GUI ============
 local keyGui = Instance.new("ScreenGui")
 keyGui.Name = "IndustrialKeySystem"
 keyGui.ResetOnSpawn = false
@@ -83,13 +82,9 @@ status.Text = ""
 status.Parent = bg
 
 local validKey = nil
-
 local function tryKey()
     local k = box.Text
-    if k == "" then
-        status.Text = "Введите ключ"
-        return
-    end
+    if k == "" then status.Text = "Введите ключ" return end
     if k == SECRET_KEY then
         status.TextColor3 = Color3.fromRGB(80, 220, 120)
         status.Text = "Ключ принят"
@@ -101,18 +96,12 @@ local function tryKey()
         status.Text = "Неверный ключ"
     end
 end
-
 btn.MouseButton1Click:Connect(tryKey)
-box.FocusLost:Connect(function(enter)
-    if enter then tryKey() end
-end)
-
-while not validKey do
-    task.wait(0.1)
-end
+box.FocusLost:Connect(function(e) if e then tryKey() end end)
+while not validKey do task.wait(0.1) end
 
 -- ============================================================
---  ОСНОВНОЙ ЧИТ (Industrial)
+--  ОСНОВНОЙ ЧИТ
 -- ============================================================
 local Library=loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Library.lua"))()
 local ThemeManager=loadstring(game:HttpGet("https://raw.githubusercontent.com/deividcomsono/Obsidian/main/addons/ThemeManager.lua"))()
@@ -160,6 +149,10 @@ local BindButtons = {}
 local BindFile = "industrial_binds.txt"
 local CurrentBindId = nil
 local WaitingForBind = false
+
+-- HUD / Watermark
+local showKeybindsHud = false
+local showWatermark = false
 
 local function SaveBinds()
     if not writefile then return end
@@ -220,6 +213,7 @@ local function ClearBind(id)
         Binds[id].key = nil
         SaveBinds()
         RefreshBindButton(id)
+        if RefreshHud then RefreshHud() end
     end
 end
 
@@ -236,6 +230,7 @@ U.InputBegan:Connect(function(input, gp)
     WaitingForBind = false
     SaveBinds()
     RefreshBindButton(id)
+    if RefreshHud then RefreshHud() end
     CurrentBindId = nil
 end)
 
@@ -282,7 +277,6 @@ aspectGui.Parent = me:WaitForChild("PlayerGui")
 local topBar = Instance.new("Frame")
 topBar.BackgroundColor3 = Color3.new(0,0,0) topBar.BorderSizePixel=0
 topBar.Size=UDim2.new(1,0,0,0) topBar.Position=UDim2.new(0,0,0,0) topBar.Parent=aspectGui
-
 local bottomBar = Instance.new("Frame")
 bottomBar.BackgroundColor3 = Color3.new(0,0,0) bottomBar.BorderSizePixel=0
 bottomBar.Size=UDim2.new(1,0,0,0) bottomBar.Position=UDim2.new(0,0,1,0) bottomBar.AnchorPoint=Vector2.new(0,1) bottomBar.Parent=aspectGui
@@ -294,6 +288,104 @@ local function ApplyAspect(ratio)
     topBar.Size = UDim2.new(1, 0, 0, barHeight)
     bottomBar.Size = UDim2.new(1, 0, 0, barHeight)
 end
+
+-- ============ KEYBINDS HUD ============
+local hudGui = Instance.new("ScreenGui")
+hudGui.Name = "IndustrialKeybindsHUD"
+hudGui.ResetOnSpawn = false
+hudGui.IgnoreGuiInset = true
+hudGui.DisplayOrder = 50
+hudGui.Parent = me:WaitForChild("PlayerGui")
+
+local hudFrame = Instance.new("Frame")
+hudFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+hudFrame.BackgroundTransparency = 0.25
+hudFrame.BorderSizePixel = 0
+hudFrame.Size = UDim2.new(0, 220, 0, 30)
+hudFrame.Position = UDim2.new(0, 15, 0, 15)
+hudFrame.Visible = false
+hudFrame.Parent = hudGui
+Instance.new("UICorner", hudFrame).CornerRadius = UDim.new(0, 6)
+local hudStroke = Instance.new("UIStroke", hudFrame)
+hudStroke.Color = Color3.fromRGB(125, 85, 255)
+hudStroke.Thickness = 1
+
+local hudTitle = Instance.new("TextLabel")
+hudTitle.Size = UDim2.new(1, 0, 0, 22)
+hudTitle.BackgroundTransparency = 1
+hudTitle.TextColor3 = Color3.fromRGB(200, 200, 220)
+hudTitle.Font = Enum.Font.GothamBold
+hudTitle.TextSize = 12
+hudTitle.Text = "Keybinds"
+hudTitle.Parent = hudFrame
+
+local hudList = Instance.new("Frame")
+hudList.BackgroundTransparency = 1
+hudList.Size = UDim2.new(1, 0, 0, 0)
+hudList.Position = UDim2.new(0, 0, 0, 24)
+hudList.Parent = hudFrame
+local hudLayout = Instance.new("UIListLayout")
+hudLayout.Padding = UDim.new(0, 2)
+hudLayout.Parent = hudList
+
+local hudRows = {}
+local function RefreshHud()
+    for _, row in pairs(hudRows) do row:Destroy() end
+    hudRows = {}
+    local y = 0
+    for id, b in pairs(Binds) do
+        if b.key then
+            local row = Instance.new("Frame")
+            row.BackgroundTransparency = 1
+            row.Size = UDim2.new(1, 0, 0, 16)
+            row.Parent = hudList
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.new(1, -10, 1, 0)
+            lbl.Position = UDim2.new(0, 5, 0, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.TextColor3 = Color3.fromRGB(180, 180, 200)
+            lbl.Font = Enum.Font.Gotham
+            lbl.TextSize = 11
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.Text = tostring(b.name_en or id) .. " — " .. tostring(b.key.Name or b.key)
+            lbl.Parent = row
+            y = y + 18
+        end
+    end
+    hudFrame.Size = UDim2.new(0, 220, 0, 30 + y)
+end
+_G.RefreshHud = RefreshHud
+
+-- ============ WATERMARK ============
+local wmGui = Instance.new("ScreenGui")
+wmGui.Name = "IndustrialWatermark"
+wmGui.ResetOnSpawn = false
+wmGui.IgnoreGuiInset = true
+wmGui.DisplayOrder = 50
+wmGui.Parent = me:WaitForChild("PlayerGui")
+
+local wmFrame = Instance.new("Frame")
+wmFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+wmFrame.BackgroundTransparency = 0.25
+wmFrame.BorderSizePixel = 0
+wmFrame.Size = UDim2.new(0, 320, 0, 28)
+wmFrame.Position = UDim2.new(0.5, -160, 0, 15)
+wmFrame.Visible = false
+wmFrame.Parent = wmGui
+Instance.new("UICorner", wmFrame).CornerRadius = UDim.new(0, 6)
+local wmStroke = Instance.new("UIStroke", wmFrame)
+wmStroke.Color = Color3.fromRGB(125, 85, 255)
+wmStroke.Thickness = 1
+
+local wmText = Instance.new("TextLabel")
+wmText.Size = UDim2.new(1, -10, 1, 0)
+wmText.Position = UDim2.new(0, 5, 0, 0)
+wmText.BackgroundTransparency = 1
+wmText.TextColor3 = Color3.fromRGB(220, 220, 240)
+wmText.Font = Enum.Font.GothamBold
+wmText.TextSize = 13
+wmText.Text = "Industrial"
+wmText.Parent = wmFrame
 
 -- ============ TAB ICON PATCH ============
 do
@@ -526,6 +618,19 @@ ED:AddToggle('hE',{Text=TT('Health','Здоровье'),Default=true,Callback=fu
 ED:AddToggle('dE',{Text=TT('Distance','Дистанция'),Default=true,Callback=function(v) dist=v end})
 ED:AddToggle('gE',{Text=TT('Gradient','Градиент'),Default=true,Callback=function(v) grad=v end})
 ED:AddToggle('ddE',{Text=TT('Hide Dead','Скрывать мёртвых'),Default=true,Callback=function(v) hideDead=v end})
+
+-- HUD + Watermark
+local ExtraV = T.E:AddRightGroupbox(TT('Overlay','Оверлей'))
+ExtraV:AddToggle('kbHudE',{Text=TT('Keybinds HUD','Кейбинды на экране'),Default=false,Callback=function(v)
+    showKeybindsHud = v
+    hudFrame.Visible = v
+    if v then RefreshHud() end
+end})
+ExtraV:AddToggle('wmE',{Text=TT('Watermark','Ватермарка'),Default=false,Callback=function(v)
+    showWatermark = v
+    wmFrame.Visible = v
+end})
+
 T.E:AddRightGroupbox(TT('Range','Дальность')):AddSlider('eMax',{Text=TT('Max Dist','Макс. дистанция'),Default=300,Min=10,Max=1000,Rounding=0,Suffix='',Callback=function(v) espMax=v end})
 
 -- ============ BINDS TAB ============
@@ -543,14 +648,14 @@ local listFrame = Instance.new("Frame")
 listFrame.Name = "ListFrame"
 listFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 listFrame.BorderSizePixel = 0
-listFrame.Size = UDim2.new(0, 320, 0, 250)
-listFrame.Position = UDim2.new(0.5, -160, 0.5, -125)
+listFrame.Size = UDim2.new(0, 360, 0, 260)
+listFrame.Position = UDim2.new(0.5, -180, 0.5, -130)
 listFrame.Visible = false
 listFrame.Parent = bindListGui
 Instance.new("UICorner", listFrame).CornerRadius = UDim.new(0, 8)
-local stroke = Instance.new("UIStroke", listFrame)
-stroke.Color = Color3.fromRGB(125, 85, 255)
-stroke.Thickness = 1
+local lstroke = Instance.new("UIStroke", listFrame)
+lstroke.Color = Color3.fromRGB(125, 85, 255)
+lstroke.Thickness = 1
 
 local listTitle = Instance.new("TextLabel")
 listTitle.Size = UDim2.new(1, 0, 0, 28)
@@ -585,7 +690,7 @@ local function makeRow(id, nameText, order)
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
 
     local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, -110, 1, 0)
+    lbl.Size = UDim2.new(1, -150, 1, 0)
     lbl.Position = UDim2.new(0, 10, 0, 0)
     lbl.BackgroundTransparency = 1
     lbl.TextColor3 = Color3.fromRGB(220, 220, 220)
@@ -596,7 +701,7 @@ local function makeRow(id, nameText, order)
     lbl.Parent = row
 
     local btnBind = Instance.new("TextButton")
-    btnBind.Size = UDim2.new(0, 60, 0, 24)
+    btnBind.Size = UDim2.new(0, 100, 0, 24)
     btnBind.Position = UDim2.new(1, -100, 0.5, 0)
     btnBind.AnchorPoint = Vector2.new(1, 0.5)
     btnBind.BackgroundColor3 = Color3.fromRGB(45, 45, 52)
@@ -669,6 +774,8 @@ Menu:AddButton({Text=TT('Unload','Выгрузить'),Func=function()
     if fovGui then fovGui:Destroy() end
     if aspectGui then aspectGui:Destroy() end
     if bindListGui then bindListGui:Destroy() end
+    if hudGui then hudGui:Destroy() end
+    if wmGui then wmGui:Destroy() end
     Library:Unload()
 end})
 
@@ -684,6 +791,22 @@ LB:AddButton({Text='Русский',Func=function()
     Library:Notify("Язык: Русский (переоткрой H для применения)", 2)
 end})
 LB:AddLabel(TT('Note: reopen the menu (H) to fully apply.','Примечание: переоткрой меню (H) чтобы язык применился.'))
+
+-- ============ WATERMARK LOOP ============
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if showWatermark then
+            local ping = 0
+            pcall(function()
+                ping = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
+            end)
+            local fps = math.floor(1 / math.max(R.RenderStepped:Wait(), 1e-6))
+            local h = os.date("%H:%M:%S")
+            wmText.Text = string.format("Industrial | Ping: %dms | FPS: %d | %s", ping, fps, h)
+        end
+    end
+end)
 
 -- ============ RENDER LOOPS ============
 local Cam=workspace.CurrentCamera
