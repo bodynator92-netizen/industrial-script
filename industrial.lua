@@ -149,10 +149,37 @@ local BindButtons = {}
 local BindFile = "industrial_binds.txt"
 local CurrentBindId = nil
 local WaitingForBind = false
-
--- HUD / Watermark
 local showKeybindsHud = false
 local showWatermark = false
+
+-- Draggable helper
+local function MakeDraggable(frame, dragArea)
+    dragArea = dragArea or frame
+    local dragging, dragStart, startPos
+    dragArea.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    dragArea.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
 
 local function SaveBinds()
     if not writefile then return end
@@ -211,9 +238,10 @@ end
 local function ClearBind(id)
     if Binds[id] then
         Binds[id].key = nil
+        Binds[id].state = false
         SaveBinds()
         RefreshBindButton(id)
-        if RefreshHud then RefreshHud() end
+        if _G.RefreshHud then _G.RefreshHud() end
     end
 end
 
@@ -230,7 +258,7 @@ U.InputBegan:Connect(function(input, gp)
     WaitingForBind = false
     SaveBinds()
     RefreshBindButton(id)
-    if RefreshHud then RefreshHud() end
+    if _G.RefreshHud then _G.RefreshHud() end
     CurrentBindId = nil
 end)
 
@@ -247,6 +275,7 @@ U.InputBegan:Connect(function(input, gp)
             if match then
                 b.state = not b.state
                 pcall(b.callback, b.state)
+                if _G.RefreshHud then _G.RefreshHud() end
             end
         end
     end
@@ -301,7 +330,7 @@ local hudFrame = Instance.new("Frame")
 hudFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
 hudFrame.BackgroundTransparency = 0.25
 hudFrame.BorderSizePixel = 0
-hudFrame.Size = UDim2.new(0, 220, 0, 30)
+hudFrame.Size = UDim2.new(0, 240, 0, 30)
 hudFrame.Position = UDim2.new(0, 15, 0, 15)
 hudFrame.Visible = false
 hudFrame.Parent = hudGui
@@ -343,16 +372,18 @@ local function RefreshHud()
             lbl.Size = UDim2.new(1, -10, 1, 0)
             lbl.Position = UDim2.new(0, 5, 0, 0)
             lbl.BackgroundTransparency = 1
-            lbl.TextColor3 = Color3.fromRGB(180, 180, 200)
             lbl.Font = Enum.Font.Gotham
             lbl.TextSize = 11
             lbl.TextXAlignment = Enum.TextXAlignment.Left
-            lbl.Text = tostring(b.name_en or id) .. " — " .. tostring(b.key.Name or b.key)
+            local stateTxt = b.state and "[ON] " or "[OFF]"
+            local col = b.state and Color3.fromRGB(120, 230, 120) or Color3.fromRGB(160, 160, 180)
+            lbl.TextColor3 = col
+            lbl.Text = string.format("%s %s — %s", stateTxt, tostring(b.name_en or id), tostring(b.key.Name or b.key))
             lbl.Parent = row
             y = y + 18
         end
     end
-    hudFrame.Size = UDim2.new(0, 220, 0, 30 + y)
+    hudFrame.Size = UDim2.new(0, 240, 0, 30 + y)
 end
 _G.RefreshHud = RefreshHud
 
@@ -368,8 +399,8 @@ local wmFrame = Instance.new("Frame")
 wmFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
 wmFrame.BackgroundTransparency = 0.25
 wmFrame.BorderSizePixel = 0
-wmFrame.Size = UDim2.new(0, 320, 0, 28)
-wmFrame.Position = UDim2.new(0.5, -160, 0, 15)
+wmFrame.Size = UDim2.new(0, 340, 0, 28)
+wmFrame.Position = UDim2.new(0.5, -170, 0, 15)
 wmFrame.Visible = false
 wmFrame.Parent = wmGui
 Instance.new("UICorner", wmFrame).CornerRadius = UDim.new(0, 6)
@@ -386,6 +417,10 @@ wmText.Font = Enum.Font.GothamBold
 wmText.TextSize = 13
 wmText.Text = "Industrial"
 wmText.Parent = wmFrame
+
+-- делаем перетаскиваемыми
+MakeDraggable(hudFrame, hudFrame)
+MakeDraggable(wmFrame, wmFrame)
 
 -- ============ TAB ICON PATCH ============
 do
@@ -619,7 +654,6 @@ ED:AddToggle('dE',{Text=TT('Distance','Дистанция'),Default=true,Callbac
 ED:AddToggle('gE',{Text=TT('Gradient','Градиент'),Default=true,Callback=function(v) grad=v end})
 ED:AddToggle('ddE',{Text=TT('Hide Dead','Скрывать мёртвых'),Default=true,Callback=function(v) hideDead=v end})
 
--- HUD + Watermark
 local ExtraV = T.E:AddRightGroupbox(TT('Overlay','Оверлей'))
 ExtraV:AddToggle('kbHudE',{Text=TT('Keybinds HUD','Кейбинды на экране'),Default=false,Callback=function(v)
     showKeybindsHud = v
@@ -630,6 +664,7 @@ ExtraV:AddToggle('wmE',{Text=TT('Watermark','Ватермарка'),Default=fals
     showWatermark = v
     wmFrame.Visible = v
 end})
+ExtraV:AddLabel(TT('Drag HUD/Watermark with mouse to move.','Перетаскивай HUD/Ватермарку мышкой.'))
 
 T.E:AddRightGroupbox(TT('Range','Дальность')):AddSlider('eMax',{Text=TT('Max Dist','Макс. дистанция'),Default=300,Min=10,Max=1000,Rounding=0,Suffix='',Callback=function(v) espMax=v end})
 
