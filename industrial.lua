@@ -152,7 +152,6 @@ local WaitingForBind = false
 local showKeybindsHud = false
 local showWatermark = false
 
--- Draggable helper
 local function MakeDraggable(frame, dragArea)
     dragArea = dragArea or frame
     local dragging, dragStart, startPos
@@ -418,7 +417,6 @@ wmText.TextSize = 13
 wmText.Text = "Industrial"
 wmText.Parent = wmFrame
 
--- делаем перетаскиваемыми
 MakeDraggable(hudFrame, hudFrame)
 MakeDraggable(wmFrame, wmFrame)
 
@@ -535,8 +533,8 @@ local function startFly()
         local cam=workspace.CurrentCamera local mv=Vector3.zero
         if U:IsKeyDown(Enum.KeyCode.W) then mv=mv+cam.CFrame.LookVector end
         if U:IsKeyDown(Enum.KeyCode.S) then mv=mv-cam.CFrame.LookVector end
-        if U:IsKeyDown(Enum.KeyCode.A) then mv=mv+cam.CFrame.RightVector end
-        if U:IsKeyDown(Enum.KeyCode.D) then mv=mv+cam.CFrame.RightVector end
+        if U:IsKeyDown(Enum.KeyCode.A) then mv=mv-cam.CFrame.RightVector end   -- влево
+        if U:IsKeyDown(Enum.KeyCode.D) then mv=mv+cam.CFrame.RightVector end   -- вправо
         if U:IsKeyDown(Enum.KeyCode.Space) then mv=mv+Vector3.new(0,1,0) end
         if U:IsKeyDown(Enum.KeyCode.LeftControl) then mv=mv-Vector3.new(0,1,0) end
         if mv.Magnitude>0 then mv=mv.Unit*flySpd end
