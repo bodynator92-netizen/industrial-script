@@ -5,7 +5,7 @@ local Players = game:GetService("Players")
 local me = Players.LocalPlayer
 local plrGui = me:WaitForChild("PlayerGui")
 
-local SECRET_KEY = "SukaGiveKey"   -- <-- твой ключ
+local SECRET_KEY = "1"   -- <-- твой ключ
 
 -- ============ KEY GUI ============
 local keyGui = Instance.new("ScreenGui")
