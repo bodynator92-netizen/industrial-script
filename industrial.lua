@@ -1,6 +1,7 @@
 -- ============================================================
 --  KEY SYSTEM (локальный ключ)
 -- ============================================================
+do
 local Players = game:GetService("Players")
 local me = Players.LocalPlayer
 local plrGui = me:WaitForChild("PlayerGui")
@@ -99,6 +100,7 @@ end
 btn.MouseButton1Click:Connect(tryKey)
 box.FocusLost:Connect(function(e) if e then tryKey() end end)
 while not validKey do task.wait(0.1) end
+end
 
 -- ============================================================
 --  ОСНОВНОЙ ЧИТ
@@ -131,17 +133,36 @@ local espVisibleColor=Color3.fromRGB(0,255,0)
 local espHiddenColor=Color3.fromRGB(255,0,0)
 local espTeammateColor=Color3.fromRGB(0,100,255)
 local espUseTeamColor=false
+local espFill,espFillA=false,0.4
 local espObjs={}
 
 local aim,aimFov,aimSmooth,aimMax,aimTeam=false,150,0.05,100,false
 local aimTarget,aimTargetRandom="Head",false
 local aimParts={"Head","UpperTorso","LowerTorso","HumanoidRootPart","LeftArm","RightArm","LeftLeg","RightLeg"}
+local AT={on=false,lock=nil,a360=false}
+local SKY={on=false,t=0,h=150}
+local HBT={on=false,sz=5,orig={}}
+local NS={on=false,saved={}}
 local trig,trigDelay,lastTrig=false,0.05,0
 local fovC,fovFill,fovAlpha=Color3.fromRGB(255,60,60),false,0.85
 
 local fly,flySpd,flyC,flyBV,flyBG=false,50,nil,nil,nil
 local noclip,noclipC=false,nil
 local infJump,infJumpC=false,nil
+
+local glow,glowColor=false,Color3.fromRGB(0,200,255)
+local glowObjs={}
+local tps,thirdPOff,thirdC=false,8,nil
+local bhop,bhopC=false,nil
+local ast,astSpeed,astC=false,55,nil
+local AS={on=false,c=nil}
+local night,nightOrig=false,nil
+
+local vmOn,vmFov,vmC=false,25,nil
+local camBaseFov=70
+local hgOn, hgFill, hgOutline, hgFillT, hgOutlineT, hgDepth, hgNeon = false, Color3.fromRGB(0,180,255), Color3.fromRGB(255,255,160), 0.5, 0, true, false
+local killSoundId=false
+local lastHit,lastHealth,lastPlayed,le_conn={},{},{},{}
 
 -- ============ BIND SYSTEM ============
 local Binds = {}
@@ -244,9 +265,10 @@ local function ClearBind(id)
     end
 end
 
+local suppressToggle = false
+local lastToggleAt = {}
 U.InputBegan:Connect(function(input, gp)
     if not WaitingForBind then return end
-    if gp then return end
     local id = CurrentBindId
     if not id or not Binds[id] then return end
     if input.UserInputType == Enum.UserInputType.Keyboard then
@@ -255,6 +277,7 @@ U.InputBegan:Connect(function(input, gp)
         Binds[id].key = input.UserInputType
     end
     WaitingForBind = false
+    suppressToggle = true
     SaveBinds()
     RefreshBindButton(id)
     if _G.RefreshHud then _G.RefreshHud() end
@@ -262,7 +285,9 @@ U.InputBegan:Connect(function(input, gp)
 end)
 
 U.InputBegan:Connect(function(input, gp)
+    if suppressToggle then suppressToggle = false return end
     if gp then return end
+    if WaitingForBind then return end
     for id, b in pairs(Binds) do
         if b.key and b.callback then
             local match = false
@@ -272,9 +297,13 @@ U.InputBegan:Connect(function(input, gp)
                 match = true
             end
             if match then
-                b.state = not b.state
-                pcall(b.callback, b.state)
-                if _G.RefreshHud then _G.RefreshHud() end
+                local now = os.clock()
+                if now - (lastToggleAt[id] or 0) >= 0.15 then
+                    b.state = not b.state
+                    lastToggleAt[id] = now
+                    pcall(b.callback, b.state)
+                    if _G.RefreshHud then _G.RefreshHud() end
+                end
             end
         end
     end
@@ -362,7 +391,7 @@ local function RefreshHud()
     hudRows = {}
     local y = 0
     for id, b in pairs(Binds) do
-        if b.key then
+        if b.key and b.state then
             local row = Instance.new("Frame")
             row.BackgroundTransparency = 1
             row.Size = UDim2.new(1, 0, 0, 16)
@@ -374,10 +403,8 @@ local function RefreshHud()
             lbl.Font = Enum.Font.Gotham
             lbl.TextSize = 11
             lbl.TextXAlignment = Enum.TextXAlignment.Left
-            local stateTxt = b.state and "[ON] " or "[OFF]"
-            local col = b.state and Color3.fromRGB(120, 230, 120) or Color3.fromRGB(160, 160, 180)
-            lbl.TextColor3 = col
-            lbl.Text = string.format("%s %s — %s", stateTxt, tostring(b.name_en or id), tostring(b.key.Name or b.key))
+            lbl.TextColor3 = Color3.fromRGB(120, 230, 120)
+            lbl.Text = string.format("%s %s", tostring(b.name_en or id), tostring(b.key.Name or b.key))
             lbl.Parent = row
             y = y + 18
         end
@@ -487,6 +514,87 @@ local function sameTeam(p)
 end
 local function hrp() return me.Character and me.Character:FindFirstChild("HumanoidRootPart") end
 
+-- ============ NO SCOPE BARS ============
+NS.saved={}
+local function isScopeBar(o)
+    if not (o:IsA("Frame") or o:IsA("ImageLabel") or o:IsA("TextLabel")) then return false end
+    local bg=o.BackgroundColor3
+    if not (bg.R<0.15 and bg.G<0.15 and bg.B<0.15) then return false end
+    if not (o.Size.X.Scale>=0.9 and o.AbsolutePosition.X<=2) then return false end
+    local sy=o.Size.Y.Scale
+    return (o.Position.Y.Scale<=0.35 and sy<0.6) or (o.Position.Y.Scale>=0.65 and sy<0.6) or sy>=0.9
+end
+local function scanScopeBars()
+    local pg=me:FindFirstChild("PlayerGui") if not pg then return end
+    for _,o in ipairs(pg:GetDescendants()) do
+        if isScopeBar(o) then
+            if NS.saved[o]==nil then NS.saved[o]=o.Visible end
+            if o.Visible then o.Visible=false end
+        end
+    end
+end
+local function hideScopeBars()
+    if not NS.on then return end
+    NS.n=(NS.n or 0)+1
+    if NS.n%180==0 then scanScopeBars() end
+    for o in pairs(NS.saved) do
+        if not o.Parent then NS.saved[o]=nil
+        elseif o.Visible then o.Visible=false end
+    end
+end
+local function restoreScope()
+    for o,v in pairs(NS.saved) do
+        if o and o.Parent then o.Visible=v end
+    end
+    NS.saved={}
+end
+local function setScopeBars(v)
+    NS.on=v
+    if NS.conn then NS.conn:Disconnect() NS.conn=nil end
+    if v then
+        scanScopeBars()
+        local pg=me:FindFirstChild("PlayerGui")
+        if pg then
+            NS.conn=pg.DescendantAdded:Connect(function(o)
+                if not NS.on then return end
+                if isScopeBar(o) then
+                    if NS.saved[o]==nil then NS.saved[o]=o.Visible end
+                    o.Visible=false
+                end
+            end)
+        end
+    else
+        restoreScope()
+    end
+end
+
+-- ============ BIG HITBOX (scale target parts so sky-shots instantly land) ============
+local function hbRestoreAll()
+    for part,orig in pairs(HBT.orig) do
+        if part and part.Parent then part.Size=orig end
+    end
+    HBT.orig={}
+end
+local function hbScaleTarget(p)
+    local ch=p.Character if not ch then hbRestoreAll() return false end
+    local done=false
+    for _,part in ipairs(ch:GetChildren()) do
+        if part:IsA("BasePart") and part.Name~="HumanoidRootPart" then
+            if not HBT.orig[part] then HBT.orig[part]=part.Size end
+            local o=HBT.orig[part]
+            local f=math.max(HBT.sz,0.1)
+            local want=Vector3.new(math.max(o.X*f,1),math.max(o.Y*f,1),math.max(o.Z*f,1))
+            local cur=part.Size
+            if math.abs(cur.X-want.X)>0.5 or math.abs(cur.Y-want.Y)>0.5 or math.abs(cur.Z-want.Z)>0.5 then
+                part.Size=want
+            end
+            done=true
+        end
+    end
+    if not done then hbRestoreAll() return false end
+    return true
+end
+
 -- ============ ESP ============
 local function rmESP(p)
     local d=espObjs[p] if not d then return end
@@ -519,6 +627,39 @@ end
 P.PlayerAdded:Connect(function(p) p.CharacterAdded:Connect(function() task.wait(1) if esp then mkESP(p) end end) end)
 for _,p in ipairs(P:GetPlayers()) do if p~=me then p.CharacterAdded:Connect(function() task.wait(1) if esp then mkESP(p) end end) end end
 P.PlayerRemoving:Connect(rmESP)
+
+-- ============ GLOW ============
+local glowFillT,glowOutlineT=0.75,0
+local function rmGlow(p)
+    local d=glowObjs[p] if not d then return end
+    if d.g then pcall(function() d.g.Adornee=nil d.g:Destroy() end) end
+    glowObjs[p]=nil
+end
+local function mkGlow(p)
+    if p==me then return end
+    local ch=p.Character if not ch then return end
+    rmGlow(p)
+    local g=Instance.new("Highlight")
+    g.Adornee=ch
+    g.FillColor=glowColor
+    g.FillTransparency=glowFillT
+    g.OutlineColor=glowColor
+    g.OutlineTransparency=glowOutlineT
+    g.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+    g.Parent=me:WaitForChild("PlayerGui")
+    glowObjs[p]={g=g}
+end
+local function refreshGlow()
+    for p in pairs(glowObjs) do rmGlow(p) end
+    if not glow then return end
+    for _,p in ipairs(P:GetPlayers()) do if p~=me then mkGlow(p) end end
+end
+local function updateGlowColor()
+    for _,d in pairs(glowObjs) do if d.g then d.g.FillColor=glowColor d.g.OutlineColor=glowColor end end
+end
+P.PlayerAdded:Connect(function(p) p.CharacterAdded:Connect(function() task.wait(1) if glow then mkGlow(p) end end) end)
+for _,p in ipairs(P:GetPlayers()) do if p~=me then p.CharacterAdded:Connect(function() task.wait(1) if glow then mkGlow(p) end end) end end
+P.PlayerRemoving:Connect(rmGlow)
 
 -- ============ MOVEMENT ============
 local function killFly() if flyC then flyC:Disconnect() flyC=nil end if flyBV then flyBV:Destroy() flyBV=nil end if flyBG then flyBG:Destroy() flyBG=nil end end
@@ -583,10 +724,310 @@ local function startInfJump()
     end)
 end
 
+-- ============ BUNNY HOP ============
+local function startBhop()
+    if bhopC then bhopC:Disconnect() end
+    bhopC=R.Heartbeat:Connect(function()
+        if not bhop then return end
+        local h=me.Character and me.Character:FindFirstChildOfClass("Humanoid")
+        if not h then return end
+        if not U:IsKeyDown(Enum.KeyCode.Space) then return end
+        local st=h:GetState()
+        if st==Enum.HumanoidStateType.Running or st==Enum.HumanoidStateType.Idle or h.FloorMaterial~=Enum.Material.Air then
+            h:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end)
+end
+
+-- ============ AIR STRAFE (WASD) ============
+local function startAirStrafe()
+    if astC then astC:Disconnect() end
+    astC=R.RenderStepped:Connect(function(dt)
+        if not ast then return end
+        local h=hrp() if not h then return end
+        local hum=me.Character and me.Character:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        local st=hum:GetState()
+        local inAir=(st==Enum.HumanoidStateType.Freefall or st==Enum.HumanoidStateType.Jumping or hum.FloorMaterial==Enum.Material.Air)
+        if not inAir then return end
+        local md=hum.MoveDirection
+        if md.Magnitude<0.01 then return end
+        local move=md.Unit
+        local v=h.AssemblyLinearVelocity
+        local hv=Vector3.new(v.X,0,v.Z)
+        local add=move*astSpeed-hv
+        if add.Magnitude>0.05 then
+            local accel=math.min(add.Magnitude,astSpeed*dt*8)
+            h.AssemblyLinearVelocity=v+add.Unit*accel
+        end
+    end)
+end
+
+-- ============ AUTO STOP (freeze movement while aiming) ============
+local function startAutoStop()
+    if AS.c then AS.c:Disconnect() end
+    AS.c=R.RenderStepped:Connect(function()
+        if not AS.on then return end
+        if not U:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
+        local h=hrp() if not h then return end
+        local v=h.AssemblyLinearVelocity
+        h.AssemblyLinearVelocity=Vector3.new(0,v.Y,0)
+    end)
+end
+
+-- ============ VIEWMODEL (push hands away) ============
+local function ApplyFov()
+    local cam=workspace.CurrentCamera
+    if not cam then return end
+    if vmOn then
+        cam.FieldOfView=math.clamp(camBaseFov+vmFov,30,140)
+    else
+        cam.FieldOfView=camBaseFov
+    end
+end
+local function startViewmodel()
+    if vmC then vmC:Disconnect() end
+    vmC=R.RenderStepped:Connect(function()
+        if vmOn then
+            local cam=workspace.CurrentCamera
+            if cam then cam.FieldOfView=math.clamp(camBaseFov+vmFov,30,140) end
+        end
+    end)
+end
+local function setViewmodel(v)
+    vmOn=v
+    if v then startViewmodel() else if vmC then vmC:Disconnect() vmC=nil end ApplyFov() end
+end
+
+-- ============ HANDS GLOW ============
+local hgHighlights={}
+local hgOrig={}
+local handGlowNames={"LeftHand","RightHand","LeftLowerArm","RightLowerArm","LeftUpperArm","RightUpperArm","Left Arm","Right Arm","LeftFoot","RightFoot"}
+local function getHandParts()
+    local c=me.Character if not c then return {} end
+    local t={}
+    for _,n in ipairs(handGlowNames) do
+        local p=c:FindFirstChild(n)
+        if p and p:IsA("BasePart") then t[#t+1]=p end
+    end
+    return t
+end
+local function restoreHandParts()
+    for p,orig in pairs(hgOrig) do
+        if p and p.Parent then
+            pcall(function() p.Material=orig.m p.Color=orig.c end)
+        end
+    end
+    hgOrig={}
+end
+local function applyHandNeon()
+    for _,p in ipairs(getHandParts()) do
+        if not hgOrig[p] then
+            hgOrig[p]={m=p.Material,c=p.Color}
+        end
+        p.Material=Enum.Material.Neon
+        p.Color=hgFill
+    end
+end
+local function refreshHandGlow()
+    for p,h in pairs(hgHighlights) do
+        if not h or not h.Parent or not p or not p.Parent then
+            if h then pcall(function() h:Destroy() end) end
+            hgHighlights[p]=nil
+        end
+    end
+    for p in pairs(hgOrig) do
+        if not p or not p.Parent then hgOrig[p]=nil end
+    end
+    if not hgOn then return end
+    if hgNeon then applyHandNeon() else restoreHandParts() end
+    for _,p in ipairs(getHandParts()) do
+        local h=hgHighlights[p]
+        if not h then
+            h=Instance.new("Highlight")
+            h.Name="IndustrialHandGlow"
+            h.Adornee=p
+            h.Parent=p
+            hgHighlights[p]=h
+        end
+        h.FillColor=hgFill
+        h.FillTransparency=hgFillT
+        h.OutlineColor=hgOutline
+        h.OutlineTransparency=hgOutlineT
+        h.DepthMode=hgDepth and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+    end
+end
+local function stopHandGlow()
+    for p,h in pairs(hgHighlights) do pcall(function() h:Destroy() end) end
+    hgHighlights={}
+    restoreHandParts()
+end
+
+-- ============ KILLSOUND ============
+local ksFiles={}
+local loadKS
+do
+    local function loadKSImpl(name, path)
+        if not getcustomasset then return nil end
+        local ok,id=pcall(getcustomasset,path)
+        if ok and type(id)=="string" and #id>0 and id:sub(1,8)=="rbxasset" then return id end
+        if isfile and isfile(path) and readfile and writefile then
+            local ok2,data=pcall(readfile,path)
+            if ok2 and data then
+                local dest=name
+                if makefolder and (not isfolder or not isfolder("killsounds")) then
+                    pcall(makefolder,"killsounds")
+                    if isfolder and isfolder("killsounds") then dest="killsounds/"..name end
+                end
+                local ok3=pcall(writefile,dest,data)
+                if ok3 then
+                    local ok4,id2=pcall(getcustomasset,dest)
+                    if ok4 and type(id2)=="string" and #id2>0 then return id2 end
+                end
+            end
+        end
+        return nil
+    end
+    loadKS=loadKSImpl
+    ksFiles.NeverLose=loadKS("neverlose.wav","C:\\Users\\Administrator\\Desktop\\neverlose.wav")
+    ksFiles.Skeet=loadKS("skeet.wav","C:\\Users\\Administrator\\Desktop\\skeet.wav")
+end
+local function PlayKillSound()
+    if not killSoundId then return end
+    local s=Instance.new("Sound")
+    s.SoundId=killSoundId
+    s.Volume=2
+    s.Parent=workspace.CurrentCamera or workspace
+    s:Play()
+    task.spawn(function() task.wait(3) pcall(function() s:Destroy() end) end)
+end
+local function TrackPlayer(p)
+    if p==me then return end
+    local function tryKill()
+        if not killSoundId then return end
+        if os.clock()-(lastHit[p] or -9)>3 then return end
+        if os.clock()-(lastPlayed[p] or -9)<1 then return end
+        lastPlayed[p]=os.clock()
+        PlayKillSound()
+    end
+    local function onHP(hum,hp)
+        local prev=lastHealth[hum]
+        if prev and hp<prev then lastHit[p]=os.clock() end
+        lastHealth[hum]=hp
+        if hp<=0 then tryKill() end
+    end
+    local function hook(char)
+        if not char then return end
+        local hum=char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            lastHealth[hum]=hum.Health
+            hum.HealthChanged:Connect(function(hp) onHP(hum,hp) end)
+            hum.Died:Connect(tryKill)
+            le_conn[p]=char.AncestryChanged:Connect(function(_,parent)
+                if parent==nil then tryKill() end
+            end)
+        end
+    end
+    hook(p.Character)
+    p.CharacterAdded:Connect(hook)
+    le_conn["rem_"..p.Name]=p.CharacterRemoving:Connect(function(char)
+        local hum=char and char:FindFirstChildOfClass("Humanoid")
+        if hum then lastHealth[hum]=0 end
+        tryKill()
+    end)
+end
+P.PlayerAdded:Connect(TrackPlayer)
+for _,p in ipairs(P:GetPlayers()) do TrackPlayer(p) end
+
+-- ============ THIRD PERSON ============
+local function setThird(v)
+    tps=v
+    if v then
+        if not thirdC then
+            thirdC=R.RenderStepped:Connect(function()
+                if not tps then return end
+                local h=hrp() if not h then return end
+                local cam=workspace.CurrentCamera
+                if not cam then return end
+                local pos=h.Position+Vector3.new(0,2.5,0)
+                cam.CFrame=CFrame.lookAt(pos-cam.CFrame.LookVector*thirdPOff,pos)
+            end)
+        end
+        local cam=workspace.CurrentCamera
+        if cam then cam.CameraType=Enum.CameraType.Scriptable end
+    else
+        if thirdC then thirdC:Disconnect() thirdC=nil end
+        local cam=workspace.CurrentCamera
+        if cam then cam.CameraType=Enum.CameraType.Custom end
+    end
+end
+
+-- ============ NIGHT MODE (winter vibe) ============
+local function setNight(v)
+    night=v
+    if v then
+        if not nightOrig then
+            nightOrig={
+                Brightness=L.Brightness,
+                Ambient=L.Ambient,
+                OutdoorAmbient=L.OutdoorAmbient,
+                GlobalShadows=L.GlobalShadows,
+                FogStart=L.FogStart,
+                FogEnd=L.FogEnd,
+                FogColor=L.FogColor,
+                ClockTime=L.ClockTime,
+                TimeOfDay=L.TimeOfDay,
+            }
+        end
+        L.Brightness=0.55
+        L.Ambient=Color3.fromRGB(140,165,210)
+        L.OutdoorAmbient=Color3.fromRGB(110,140,190)
+        L.GlobalShadows=true
+        pcall(function()
+            L.ClockTime=0.05
+            L.TimeOfDay="01:15:00"
+        end)
+        L.FogStart=40
+        L.FogEnd=420
+        L.FogColor=Color3.fromRGB(200,215,240)
+        if not L:FindFirstChild("IndustrialSnowTint") then
+            local cc=Instance.new("ColorCorrectionEffect")
+            cc.Name="IndustrialSnowTint"
+            cc.Brightness=0.05
+            cc.Saturation=-0.25
+            cc.Contrast=0.1
+            cc.TintColor=Color3.fromRGB(190,205,235)
+            cc.Parent=L
+        end
+    else
+        if nightOrig then
+            L.Brightness=nightOrig.Brightness
+            L.Ambient=nightOrig.Ambient
+            L.OutdoorAmbient=nightOrig.OutdoorAmbient
+            L.GlobalShadows=nightOrig.GlobalShadows
+            L.FogStart=nightOrig.FogStart
+            L.FogEnd=nightOrig.FogEnd
+            L.FogColor=nightOrig.FogColor
+            pcall(function()
+                L.ClockTime=nightOrig.ClockTime
+                L.TimeOfDay=nightOrig.TimeOfDay
+            end)
+        end
+        local cc=L:FindFirstChild("IndustrialSnowTint")
+        if cc then cc:Destroy() end
+    end
+end
+
 me.CharacterAdded:Connect(function()
     task.wait(1)
     if fly then startFly() end
     if noclip then startNoclip() end
+    if bhop then startBhop() end
+    if ast then startAirStrafe() end
+    if AS.on then startAutoStop() end
+    if tps then setThird(true) end
+    if vmOn then startViewmodel() end
+    if hgOn then refreshHandGlow() end
 end)
 
 -- ============ REGISTER BINDS ============
@@ -605,6 +1046,25 @@ RegisterBind('ijE','Infinite Jump','Бесконечный прыжок', functi
 RegisterBind('aimE','Aimbot','Аимбот', function(v) aim=v fovCirc.Visible=v fovFillF.Visible=v and fovFill end)
 RegisterBind('espE','ESP','ESP', function(v) esp=v refreshESP() end)
 RegisterBind('trigE','Triggerbot','Триггербот', function(v) trig=v end)
+RegisterBind('glowE','Glow','Глоу', function(v)
+    glow=v
+    if v then refreshGlow() else for p in pairs(glowObjs) do rmGlow(p) end end
+end)
+RegisterBind('bhopE','BunnyHop','Баннихоп', function(v)
+    bhop=v
+    if v then startBhop() elseif bhopC then bhopC:Disconnect() bhopC=nil end
+end)
+RegisterBind('astE','AirStrafe','Эйрстрайф', function(v)
+    ast=v
+    if v then startAirStrafe() elseif astC then astC:Disconnect() astC=nil end
+end)
+RegisterBind('vmE','Viewmodel','Вьюмодель', function(v) setViewmodel(v) end)
+RegisterBind('hgE','Hands Glow','Свечение рук', function(v)
+    hgOn=v
+    if v then refreshHandGlow() else stopHandGlow() end
+end)
+RegisterBind('tpsE','Third Person','Вид от 3-го лица', function(v) setThird(v) end)
+RegisterBind('nmE','Night Mode','Ночной режим', function(v) setNight(v) end)
 
 LoadBinds()
 
@@ -614,9 +1074,16 @@ AG:AddToggle('aimE',{Text=TT('Aimbot','Аимбот'),Default=false,Callback=fun
 AG:AddToggle('aimT',{Text=TT('Team Check','Проверка команды'),Default=false,Callback=function(v) aimTeam=v end})
 AG:AddDropdown('aimPart',{Text=TT('Lock Part','Часть захвата'),Default='Head',Values={'Head','UpperTorso','LowerTorso','HumanoidRootPart','LeftArm','RightArm','LeftLeg','RightLeg'},Callback=function(v) aimTarget=v end})
 AG:AddToggle('aimRand',{Text=TT('Random Part','Случайная часть'),Default=false,Callback=function(v) aimTargetRandom=v end})
-AG:AddSlider('aimF',{Text=TT('FOV','Радиус'),Default=150,Min=0,Max=400,Rounding=0,Suffix='',Callback=function(v) aimFov=v fovCirc.Size=UDim2.new(0,v*2,0,v*2) fovFillF.Size=UDim2.new(0,v*2,0,v*2) end})
+AG:AddSlider('aimF',{Text=TT('FOV','Радиус'),Default=150,Min=0,Max=180,Rounding=0,Suffix='',Callback=function(v) aimFov=v fovCirc.Size=UDim2.new(0,v*2,0,v*2) fovFillF.Size=UDim2.new(0,v*2,0,v*2) end})
 AG:AddSlider('aimS',{Text=TT('Smooth','Плавность'),Default=5,Min=0,Max=100,Rounding=0,Suffix='%',Callback=function(v) aimSmooth=v/100 end})
 AG:AddSlider('aimM',{Text=TT('Max Dist','Макс. дистанция'),Default=100,Min=10,Max=500,Rounding=0,Suffix='',Callback=function(v) aimMax=v end})
+AG:AddToggle('lockE',{Text=TT('Aim Lock','Лок цели'),Default=false,Callback=function(v) AT.on=v if not v then AT.lock=nil end end})
+AG:AddToggle('a360E',{Text=TT('360 Aimbot','Аимбот 360'),Default=false,Callback=function(v) AT.a360=v end})
+AG:AddToggle('skyE',{Text=TT('Sky Aim','Стрельба в небо'),Default=false,Callback=function(v) SKY.on=v end})
+AG:AddSlider('skyH',{Text=TT('Sky Height','Высота неба'),Default=150,Min=50,Max=500,Rounding=0,Suffix='',Callback=function(v) SKY.h=v end})
+AG:AddToggle('scopeBarE',{Text=TT('Remove Scope Bars','Убрать полосы прицела'),Default=false,Callback=function(v) setScopeBars(v) end})
+AG:AddToggle('hbE',{Text=TT('Big Hitbox','Большой хитбокс'),Default=false,Callback=function(v) HBT.on=v if not v then hbRestoreAll() end end})
+AG:AddSlider('hbS',{Text=TT('Hitbox Size','Размер хитбокса'),Default=5,Min=1,Max=15,Rounding=0,Suffix='x',Callback=function(v) HBT.sz=v end})
 local TG=T.C:AddRightGroupbox(TT('Trigger Bot','Триггер-бот'))
 TG:AddToggle('trigE',{Text=TT('Triggerbot','Триггербот'),Default=false,Callback=function(v) trig=v end})
 TG:AddSlider('trigD',{Text=TT('Delay (ms)','Задержка (мс)'),Default=50,Min=10,Max=500,Rounding=0,Suffix='',Callback=function(v) trigDelay=v/1000 end})
@@ -648,10 +1115,48 @@ MG:AddToggle('ncE',{Text=TT('Noclip','Проход сквозь стены'),Def
     end
 end})
 MG:AddToggle('ijE',{Text=TT('Infinite Jump','Бесконечный прыжок'),Default=false,Callback=function(v) infJump=v if v then startInfJump() elseif infJumpC then infJumpC:Disconnect() infJumpC=nil end end})
+MG:AddToggle('bhopE',{Text=TT('BunnyHop','Баннихоп'),Default=false,Callback=function(v)
+    bhop=v
+    if v then startBhop() elseif bhopC then bhopC:Disconnect() bhopC=nil end
+end})
+MG:AddToggle('astE',{Text=TT('AirStrafe','Эйрстрайф'),Default=false,Callback=function(v)
+    ast=v
+    if v then startAirStrafe() elseif astC then astC:Disconnect() astC=nil end
+end})
+MG:AddSlider('astS',{Text=TT('AirStrafe Speed','Макс. скорость воздуха'),Default=55,Min=10,Max=250,Rounding=0,Suffix='',Callback=function(v) astSpeed=v end})
+MG:AddToggle('asE',{Text=TT('Auto Stop (hold RMB)','Авто-стоп (ПКМ)'),Default=false,Callback=function(v)
+    AS.on=v
+    if v then startAutoStop() elseif AS.c then AS.c:Disconnect() AS.c=nil end
+end})
 
 -- ============ FUN TAB ============
 local FL=T.F:AddLeftGroupbox(TT('Fun','Развлечения'))
-FL:AddLabel(TT('Fun features coming soon.','Развлекательные функции скоро.'))
+FL:AddDropdown('ksS',{Text=TT('Kill Sound','Звук убийства'),Default='Off',Values={'Off','NeverLose','Skeet'},Callback=function(v)
+    if v=='Off' then killSoundId=false return end
+    local file,path
+    if v=='NeverLose' then
+        file=ksFiles.NeverLose path="C:\\Users\\Administrator\\Desktop\\neverlose.wav"
+    else
+        file=ksFiles.Skeet path="C:\\Users\\Administrator\\Desktop\\skeet.wav"
+    end
+    if not file then file=loadKS(v=="NeverLose" and "neverlose.wav" or "skeet.wav",path) end
+    local id=file
+    if id then
+        killSoundId=id
+        Library:Notify(TT('KillSound: '..v,'Звук убийства: '..v),2)
+    else
+        killSoundId=false
+        Library:Notify(TT('Sound file not found','Файл звука не найден на рабочем столе'),2)
+    end
+end})
+FL:AddButton({Text=TT('Test Kill Sound','Тест звука убийства'),Func=function()
+    if not killSoundId then
+        Library:Notify(TT('Select a kill sound first','Сначала выберите звук убийства'),2)
+        return
+    end
+    PlayKillSound()
+    Library:Notify(TT('Playing kill sound...','Играет звук убийства...'),2)
+end})
 FL:AddButton({Text=TT('Jump Scare (sound)','Пугнуть (звук)'),Func=function()
     local s=Instance.new("Sound") s.SoundId="rbxassetid://130777695" s.Volume=5
     s.Parent=me:WaitForChild("PlayerGui") s:Play()
@@ -680,10 +1185,12 @@ Gfx:AddButton({Text=TT('RTX Toggle','Переключить RTX'),Func=function(
 end})
 local CamBox = T.E:AddRightGroupbox(TT('Camera','Камера'))
 CamBox:AddSlider('camFovS',{Text=TT('Camera FOV','Угол обзора камеры'),Default=70,Min=30,Max=120,Rounding=0,Suffix='',Callback=function(v)
+    camBaseFov = v
     local cam = workspace.CurrentCamera
     if cam then cam.FieldOfView = v end
 end})
 CamBox:AddButton({Text=TT('Reset Camera FOV','Сбросить FOV камеры'),Func=function()
+    camBaseFov = 70
     local cam = workspace.CurrentCamera
     if cam then cam.FieldOfView = 70 end
 end})
@@ -693,6 +1200,33 @@ CamBox:AddButton({Text=TT('Reset Aspect','Сбросить Aspect'),Func=functio
 local EM=T.E:AddLeftGroupbox(TT('Visual','Визуал'))
 EM:AddToggle('espE',{Text=TT('ESP','ESP'),Default=false,Callback=function(v) esp=v refreshESP() end})
 EM:AddToggle('espT',{Text=TT('Team Check','Проверка команды'),Default=false,Callback=function(v) espTeam=v refreshESP() end})
+EM:AddToggle('espFillE',{Text=TT('ESP Fill','Заливка ESP'),Default=false,Callback=function(v) espFill=v end})
+EM:AddSlider('espFillA',{Text=TT('Fill Transparency','Прозрачность заливки'),Default=40,Min=0,Max=90,Rounding=0,Suffix='%',Callback=function(v) espFillA=v/100 end})
+EM:AddToggle('glowE',{Text=TT('Glow','Глоу'),Default=false,Callback=function(v)
+    glow=v
+    if v then refreshGlow() else for p in pairs(glowObjs) do rmGlow(p) end end
+end})
+EM:AddLabel(TT('Glow Color','Цвет глоу')):AddColorPicker('glowC',{Default=glowColor,Title=TT('Glow Color','Цвет глоу'),Transparency=0,
+    Callback=function(v) glowColor=v updateGlowColor() end})
+local CM=T.E:AddRightGroupbox(TT('Viewmodel','Вьюмодель'))
+CM:AddToggle('vmE',{Text=TT('Viewmodel','Вьюмодель'),Default=false,Callback=function(v) setViewmodel(v) end})
+CM:AddSlider('vmD',{Text=TT('Hands Distance','Отдаление рук'),Default=25,Min=0,Max=60,Rounding=0,Suffix='',Callback=function(v) vmFov=v end})
+CM:AddToggle('hgE',{Text=TT('Hands Glow','Свечение рук'),Default=false,Callback=function(v)
+    hgOn=v
+    if v then refreshHandGlow() else stopHandGlow() end
+end})
+CM:AddLabel(TT('Fill Color','Цвет заливки')):AddColorPicker('hgFC',{Default=hgFill,Title=TT('Fill Color','Цвет заливки'),Transparency=0,
+    Callback=function(v) hgFill=v refreshHandGlow() end})
+CM:AddLabel(TT('Outline Color','Цвет обводки')):AddColorPicker('hgOC',{Default=hgOutline,Title=TT('Outline Color','Цвет обводки'),Transparency=0,
+    Callback=function(v) hgOutline=v refreshHandGlow() end})
+CM:AddSlider('hgFT',{Text=TT('Fill Transparency','Прозрачность заливки'),Default=50,Min=0,Max=100,Rounding=0,Suffix='%',Callback=function(v) hgFillT=v/100 refreshHandGlow() end})
+CM:AddSlider('hgOT',{Text=TT('Outline Transparency','Прозрачность обводки'),Default=0,Min=0,Max=100,Rounding=0,Suffix='%',Callback=function(v) hgOutlineT=v/100 refreshHandGlow() end})
+CM:AddToggle('hgDepthE',{Text=TT('Always On Top','Поверх всего'),Default=true,Callback=function(v) hgDepth=v refreshHandGlow() end})
+CM:AddToggle('hgNeonE',{Text=TT('Neon Material','Неоновая текстура'),Default=false,Callback=function(v) hgNeon=v refreshHandGlow() end})
+CM:AddToggle('tpsE',{Text=TT('Third Person','Вид от 3-го лица'),Default=false,Callback=function(v) setThird(v) end})
+CM:AddSlider('tpsD',{Text=TT('Camera Distance','Дистанция камеры'),Default=8,Min=3,Max=30,Rounding=0,Suffix='',Callback=function(v) thirdPOff=v end})
+local NM=T.E:AddRightGroupbox(TT('Environment','Окружение'))
+NM:AddToggle('nmE',{Text=TT('Night Mode','Ночной режим'),Default=false,Callback=function(v) setNight(v) end})
 local ED=T.E:AddLeftGroupbox(TT('Display','Отображение'))
 ED:AddToggle('nE',{Text=TT('Names','Имена'),Default=true,Callback=function(v) names=v end})
 ED:AddToggle('hE',{Text=TT('Health','Здоровье'),Default=true,Callback=function(v) health=v end})
@@ -820,6 +1354,13 @@ for _, entry in ipairs({
     {'aimE','Aimbot','Аимбот'},
     {'espE','ESP','ESP'},
     {'trigE','Triggerbot','Триггербот'},
+    {'glowE','Glow','Глоу'},
+    {'bhopE','BunnyHop','Баннихоп'},
+    {'astE','AirStrafe','Эйрстрайф'},
+    {'vmE','Viewmodel','Вьюмодель'},
+    {'hgE','Hands Glow','Свечение рук'},
+    {'tpsE','Third Person','Вид от 3-го лица'},
+    {'nmE','Night Mode','Ночной режим'},
 }) do
     order = order + 1
     makeRow(entry[1], TT(entry[2], entry[3]), order)
@@ -852,6 +1393,18 @@ Menu:AddButton({Text=TT('Unload','Выгрузить'),Func=function()
     killFly()
     if noclipC then noclipC:Disconnect() end
     if infJumpC then infJumpC:Disconnect() end
+    if bhopC then bhopC:Disconnect() end
+    if astC then astC:Disconnect() end
+    setThird(false)
+    setNight(false)
+    setViewmodel(false)
+    hgOn=false
+    stopHandGlow()
+    setScopeBars(false)
+    HBT.on=false
+    hbRestoreAll()
+    killSoundId=false
+    for p in pairs(glowObjs) do rmGlow(p) end
     if fovGui then fovGui:Destroy() end
     if aspectGui then aspectGui:Destroy() end
     if bindListGui then bindListGui:Destroy() end
@@ -925,6 +1478,8 @@ R.RenderStepped:Connect(function()
         local col=(espUseTeamColor and sameTeam(p)) and espTeammateColor or espVisibleColor
         d.out.Visible=true d.out.Size=Vector2.new(bw,bh) d.out.Position=Vector2.new(bx,by)
         d.box.Visible=true d.box.Size=Vector2.new(bw,bh) d.box.Position=Vector2.new(bx,by) d.box.Color=col
+        d.box.Filled=espFill
+        if espFill then d.box.Transparency=espFillA end
         if health then
             local pc=math.clamp(hum.Health/math.max(hum.MaxHealth,1),0,1)
             local hh=bh*pc local hx,hy=bx-6,by+(bh-hh)
@@ -939,6 +1494,7 @@ end)
 
 local function getTarget()
     local mp=U:GetMouseLocation() local best,bd=nil,math.huge
+    local lh=hrp()
     for _,p in ipairs(P:GetPlayers()) do
         if p==me then continue end
         if aimTeam and sameTeam(p) then continue end
@@ -948,24 +1504,83 @@ local function getTarget()
         local partName=aimTargetRandom and aimParts[math.random(1,#aimParts)] or aimTarget
         local part=ch:FindFirstChild(partName) or ch:FindFirstChild("Head")
         if not part then continue end
-        local sc,on=Cam:WorldToViewportPoint(part.Position)
-        if not on then continue end
-        local d2=(Vector2.new(sc.X,sc.Y)-mp).Magnitude
         local h=ch:FindFirstChild("HumanoidRootPart")
-        local lh=me.Character and me.Character:FindFirstChild("HumanoidRootPart")
         local wd=(h and lh) and (h.Position-lh.Position).Magnitude or math.huge
-        if d2<aimFov and d2<bd and wd<=aimMax then bd=d2 best=p end
+        if wd>aimMax then continue end
+        if AT.a360 then
+            if wd<bd then bd=wd best=p end
+        else
+            local sc,on=Cam:WorldToViewportPoint(part.Position)
+            if not on then continue end
+            local d2=(Vector2.new(sc.X,sc.Y)-mp).Magnitude
+            if d2<aimFov and d2<bd then bd=d2 best=p end
+        end
     end
     return best
 end
 R.RenderStepped:Connect(function()
     if not aim then return end
-    if not U:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then return end
-    local t=getTarget() if not t then return end
+    if not U:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then hbRestoreAll() return end
+
+    if SKY.on then
+        local st=AT.lock
+        if st then
+            local sh=st.Character and st.Character:FindFirstChildOfClass("Humanoid")
+            if not (sh and sh.Health>0) then st=nil AT.lock=nil end
+        end
+        if not st then st=getTarget() AT.lock=st end
+        if not st then hbRestoreAll() return end
+        local ch=st.Character
+        local hh=ch and ch:FindFirstChild("HumanoidRootPart")
+        if not hh then hbRestoreAll() return end
+        local lh=hrp() if not lh then hbRestoreAll() return end
+        if HBT.on then hbScaleTarget(st) end
+        local skyPos=lh.Position+Vector3.new(0,SKY.h,0)
+        pcall(function()
+            ch:PivotTo(CFrame.new(skyPos))
+            hh.AssemblyLinearVelocity=Vector3.new(0,0,0)
+        end)
+        if tick()-SKY.t<0.05 then return end
+        SKY.t=tick()
+        local cam=workspace.CurrentCamera if not cam then return end
+        cam.CFrame=CFrame.lookAt(lh.Position+Vector3.new(0,2.5,0),skyPos)
+        mouse1click()
+        return
+    end
+
+    local t
+    if AT.on and AT.lock and AT.lock.Parent then
+        local hum=AT.lock.Character and AT.lock.Character:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health>0 then t=AT.lock end
+    end
+    if not t then t=getTarget() if AT.on then AT.lock=t end end
+    if not t then return end
     local ch=t.Character if not ch then return end
+    if HBT.on then hbScaleTarget(t) end
     local partName=aimTargetRandom and aimParts[math.random(1,#aimParts)] or aimTarget
     local part=ch:FindFirstChild(partName) or ch:FindFirstChild("Head")
     if not part then return end
+    if AT.a360 then
+        local cam=Cam
+        local toT=part.Position-cam.CFrame.Position
+        if toT.Magnitude<0.01 then return end
+        toT=toT.Unit
+        local cf=cam.CFrame
+        local x=toT:Dot(cf.RightVector)
+        local y=toT:Dot(cf.UpVector)
+        local z=toT:Dot(cf.LookVector)
+        local vp=cam.ViewportSize
+        local vf=math.rad(cam.FieldOfView)
+        local tanV=math.max(math.tan(vf/2),0.01)
+        local tanH=math.max(tanV*(vp.X/math.max(vp.Y,1)),0.01)
+        local yaw=math.atan2(x,z)
+        local pitch=math.atan2(y,math.sqrt(x*x+z*z))
+        local k=1-(math.clamp(aimSmooth,0,0.9)*0.9)
+        local dx=math.clamp(yaw*((vp.X/2)/tanH)*k,-700,700)
+        local dy=math.clamp(-pitch*((vp.Y/2)/tanV)*k,-700,700)
+        mousemoverel(dx,dy)
+        return
+    end
     local sc,on=Cam:WorldToViewportPoint(part.Position)
     if not on then return end
     local cur=U:GetMouseLocation() local goal=Vector2.new(sc.X,sc.Y)
@@ -981,6 +1596,16 @@ R.RenderStepped:Connect(function()
     if aimTeam and sameTeam(tp) then return end
     local hum=ch:FindFirstChildOfClass("Humanoid")
     if hum and hum.Health>0 then mouse1click() lastTrig=now end
+end)
+
+-- ============ HANDS GLOW KEEPER (re-applies every frame so it stays in 1st person and survives respawns) ============
+local hgKeepTick=0
+R.RenderStepped:Connect(function()
+    hgKeepTick=hgKeepTick+1
+    if NS.on then hideScopeBars() end
+    if not hgOn then return end
+    if hgKeepTick%5~=0 then return end
+    refreshHandGlow()
 end)
 
 -- ============ SAVE/THEME SETUP ============
